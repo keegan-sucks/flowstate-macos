@@ -27,7 +27,24 @@ Quickshell bar widget down to the essentials that matter on macOS.
   (default 9) by window-id, without stealing focus.
 - **Now-playing notifications:** optional alert each time the song changes.
 
-## Requirements
+## Install
+
+```bash
+brew install --cask keegan-sucks/tap/flowstate
+```
+
+Flowstate is ad-hoc signed, so clear Gatekeeper on first launch (once) — or right-click
+the app and choose Open:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/Flowstate.app"
+```
+
+Then authenticate the soundtrack once: `spotify_player authenticate` (needs Spotify
+Premium). Optionally install [AeroSpace](https://github.com/nikitabobko/AeroSpace) for
+workspace placement.
+
+## Requirements (to build from source)
 
 - macOS 14+
 - Full **Xcode** (to build the menu-bar GUI app)
