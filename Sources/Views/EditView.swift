@@ -19,6 +19,7 @@ struct EditView: View {
                     timerSection
                     glyphSection
                     soundSection
+                    soundtrackSection
                 }
                 .padding(16)
             }
@@ -77,6 +78,39 @@ struct EditView: View {
             soundRow("Long break", sound: $settings.longBreakSound, volume: $settings.longBreakVolume)
         }
         .opacity(settings.soundsEnabled ? 1 : 0.5)
+    }
+
+    private var soundtrackSection: some View {
+        section("Soundtrack") {
+            Toggle("Play soundtrack during focus", isOn: $settings.playSoundtrack)
+
+            HStack {
+                Text("Focus volume")
+                Spacer()
+                Text("\(settings.spotifyVolume)%").monospacedDigit().foregroundStyle(.secondary)
+            }
+            Slider(value: Binding(get: { Double(settings.spotifyVolume) },
+                                  set: { settings.spotifyVolume = Int($0.rounded()) }),
+                   in: 0...100)
+
+            Toggle("Always shuffle", isOn: $settings.alwaysShuffle)
+
+            slotEditor("Slot 1", label: $settings.slot1Label, target: $settings.slot1Target)
+            slotEditor("Slot 2", label: $settings.slot2Label, target: $settings.slot2Target)
+            slotEditor("Slot 3", label: $settings.slot3Label, target: $settings.slot3Target)
+
+            Text("Target: a Spotify URI/URL, or “liked” for Liked Songs.")
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .opacity(settings.playSoundtrack ? 1 : 0.5)
+    }
+
+    private func slotEditor(_ title: String, label: Binding<String>, target: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            TextField("Label", text: label).textFieldStyle(.roundedBorder)
+            TextField("liked or spotify:playlist:…", text: target).textFieldStyle(.roundedBorder)
+        }
     }
 
     // MARK: Row builders

@@ -5,6 +5,7 @@ struct FlowstateApp: App {
     @State private var settings: Settings
     @State private var engine: TimerEngine
     @State private var sounds: SoundPlayer
+    @State private var music: MusicController
 
     init() {
         // Menu-bar accessory: no Dock icon, even during debug runs.
@@ -12,19 +13,22 @@ struct FlowstateApp: App {
 
         let s = Settings()
         let snd = SoundPlayer(settings: s)
+        let mus = MusicController(settings: s)
         let e = TimerEngine(settings: s)
         e.onCue = { [snd] cue in snd.play(cue) }
+        e.onSessionStart = { [mus] in mus.startSoundtrack() }   // once, on begin
+        e.onSessionEnd = { [mus] in mus.stopSoundtrack() }      // once, on stop/finish
 
         _settings = State(initialValue: s)
         _sounds = State(initialValue: snd)
+        _music = State(initialValue: mus)
         _engine = State(initialValue: e)
     }
 
     var body: some Scene {
         MenuBarExtra {
-            RootView(engine: engine, settings: settings, sounds: sounds)
+            RootView(engine: engine, settings: settings, sounds: sounds, music: music)
         } label: {
-            // Headline feature: focus glyph + round dots + clock, live in the menu bar.
             menuBarLabel
         }
         .menuBarExtraStyle(.window)

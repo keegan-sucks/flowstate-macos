@@ -32,6 +32,13 @@ final class TimerEngine {
     /// Fired at each phase boundary so the app can play a sound. nil in tests.
     var onCue: ((PhaseCue) -> Void)?
 
+    /// Fired once when a session begins and once when it ends — NOT on pause/resume
+    /// or between phases. The soundtrack hooks onto these (start once, stop once).
+    var onSessionStart: (() -> Void)?
+    var onSessionEnd: (() -> Void)?
+
+    var isSessionActive: Bool { phase != .idle }
+
     private var completedFocusBlocks = 0
     private var ticker: Timer?
 
@@ -99,13 +106,14 @@ final class TimerEngine {
     func toggle() { isRunning ? pause() : start() }
 
     func reset() {
+        let wasActive = isSessionActive
         stopTicker()
         isRunning = false
         phase = .idle
         round = 1
         completedFocusBlocks = 0
         remaining = duration(for: .focus)
-        // M5: stop music + restore volume.
+        if wasActive { onSessionEnd?() }   // stop the soundtrack once
     }
 
     /// Manual advance. A *focus* skip does NOT earn the block (matches the original).
@@ -150,7 +158,7 @@ final class TimerEngine {
         remaining = duration(for: .focus)
         isRunning = true
         startTicker()
-        // M5: fire the music side-effect once, here.
+        onSessionStart?()          // start the soundtrack once
     }
 
     private func resume() { isRunning = true; startTicker() }
@@ -168,6 +176,7 @@ final class TimerEngine {
         round = 1
         completedFocusBlocks = 0
         remaining = duration(for: .focus)
+        onSessionEnd?()            // stop the soundtrack once
     }
 
     private func duration(for phase: Phase) -> Int {

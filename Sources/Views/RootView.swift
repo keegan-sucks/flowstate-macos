@@ -5,6 +5,7 @@ struct RootView: View {
     let engine: TimerEngine
     let settings: Settings
     let sounds: SoundPlayer
+    let music: MusicController
 
     @State private var editing = false
 
@@ -12,7 +13,7 @@ struct RootView: View {
         if editing {
             EditView(settings: settings, sounds: sounds) { editing = false }
         } else {
-            PanelView(engine: engine) { editing = true }
+            PanelView(engine: engine, settings: settings, music: music) { editing = true }
         }
     }
 }
