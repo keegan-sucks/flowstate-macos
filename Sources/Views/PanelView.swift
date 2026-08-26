@@ -1,21 +1,26 @@
 import SwiftUI
 
 /// The main menu-bar panel: round dots, phase, clock, transport, soundtrack slots,
-/// and a ⚙ that opens the Edit view.
+/// and a ⚙ that opens the Settings window.
 struct PanelView: View {
     let engine: TimerEngine
     let settings: Settings
     let music: MusicController
-    var edit: () -> Void
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         VStack(spacing: 12) {
             HStack {
                 Spacer()
-                Button(action: edit) { Image(systemName: "gearshape") }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
-                    .help("Edit settings")
+                Button {
+                    openSettings()
+                    NSApplication.shared.activate(ignoringOtherApps: true)
+                } label: {
+                    Image(systemName: "gearshape")
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+                .help("Settings")
             }
 
             // Round dots — reads at a glance: ●●○○
@@ -61,7 +66,7 @@ struct PanelView: View {
         .frame(width: 264)
     }
 
-    /// Soundtrack slots — tap to select (and switch live if a session is playing).
+    /// Soundtrack slots — tap to select (and switch live if a focus block is playing).
     private var soundtrackRow: some View {
         HStack(spacing: 6) {
             ForEach(0..<3, id: \.self) { i in
@@ -82,9 +87,4 @@ struct PanelView: View {
         }
         .opacity(settings.playSoundtrack ? 1 : 0.4)
     }
-}
-
-#Preview {
-    let s = Settings()
-    return PanelView(engine: TimerEngine(settings: s), settings: s, music: MusicController(settings: s), edit: {})
 }

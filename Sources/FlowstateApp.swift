@@ -34,11 +34,17 @@ struct FlowstateApp: App {
 
     var body: some Scene {
         MenuBarExtra {
-            RootView(engine: engine, settings: settings, sounds: sounds, music: music)
+            PanelView(engine: engine, settings: settings, music: music)
         } label: {
             menuBarLabel
         }
         .menuBarExtraStyle(.window)
+
+        // A proper resizable window for settings (the menu-bar popover caps its height).
+        // SwiftUI.Settings disambiguates from our own `Settings` model type.
+        SwiftUI.Settings {
+            EditView(settings: settings, sounds: sounds)
+        }
     }
 
     private var menuBarLabel: Text {

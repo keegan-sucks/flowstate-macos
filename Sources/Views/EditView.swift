@@ -1,56 +1,30 @@
 import SwiftUI
 
-/// The ⚙ settings view: durations, cycles, menu-bar glyphs, and per-cue sounds
-/// with a volume slider + preview. Bindings write straight through to persisted Settings.
+/// Settings — shown in a proper resizable macOS Settings window: durations, cycles,
+/// menu-bar glyphs, per-cue sounds, and the Spotify soundtrack.
 struct EditView: View {
     @Bindable var settings: Settings
     let sounds: SoundPlayer
-    var done: () -> Void
 
     private let focusGlyphs = ["⌖", "◉", "◎", "⧗", "✦", "◆", "●"]
     private let breakGlyphs = ["☾", "◐", "◑", "✦", "○", "◇", "◦"]
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    timerSection
-                    glyphSection
-                    soundSection
-                    soundtrackSection
-                }
-                .padding(18)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 22) {
+                timerSection
+                glyphSection
+                soundSection
+                soundtrackSection
+                Divider()
+                Button("Quit Flowstate") { NSApplication.shared.terminate(nil) }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
             }
-            .frame(maxHeight: 840)
-            Divider()
-            footer
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .frame(width: 460)
-    }
-
-    // MARK: Header / footer
-
-    private var header: some View {
-        HStack {
-            Text("Settings").font(.headline)
-            Spacer()
-            Button("Done", action: done).keyboardShortcut(.defaultAction)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-    }
-
-    private var footer: some View {
-        HStack {
-            Button("Quit Flowstate") { NSApplication.shared.terminate(nil) }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
+        .frame(minWidth: 460, idealWidth: 500, minHeight: 520, idealHeight: 780)
     }
 
     // MARK: Sections
@@ -83,6 +57,7 @@ struct EditView: View {
     private var soundtrackSection: some View {
         section("Soundtrack") {
             Toggle("Play soundtrack during focus", isOn: $settings.playSoundtrack)
+            Toggle("Notify on song change", isOn: $settings.notifyNowPlaying)
 
             HStack {
                 Text("Focus volume")
@@ -94,25 +69,16 @@ struct EditView: View {
                    in: 0...100)
 
             Toggle("Always shuffle", isOn: $settings.alwaysShuffle)
-
             stepperRow("Player workspace (0 = leave in place)", value: $settings.spotifyWorkspace, range: 0...20, unit: nil)
 
             slotEditor("Slot 1", label: $settings.slot1Label, target: $settings.slot1Target)
             slotEditor("Slot 2", label: $settings.slot2Label, target: $settings.slot2Target)
             slotEditor("Slot 3", label: $settings.slot3Label, target: $settings.slot3Target)
 
-            Text("Target: a Spotify URI/URL, or “liked” for Liked Songs.")
+            Text("Target: a Spotify URI/URL (playlist, album, or artist), or “liked” for Liked Songs.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .opacity(settings.playSoundtrack ? 1 : 0.5)
-    }
-
-    private func slotEditor(_ title: String, label: Binding<String>, target: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            TextField("Label", text: label).textFieldStyle(.roundedBorder)
-            TextField("liked or spotify:playlist:…", text: target).textFieldStyle(.roundedBorder)
-        }
     }
 
     // MARK: Row builders
@@ -143,7 +109,7 @@ struct EditView: View {
     private func soundRow(_ label: String, sound: Binding<String>, volume: Binding<Double>) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(label).frame(width: 96, alignment: .leading)
+                Text(label).frame(width: 100, alignment: .leading)
                 Picker("", selection: sound) {
                     ForEach(SoundPlayer.available, id: \.self) { Text($0).tag($0) }
                 }
@@ -165,6 +131,16 @@ struct EditView: View {
         .disabled(!settings.soundsEnabled)
     }
 
+    private func slotEditor(_ title: String, label: Binding<String>, target: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                TextField("Label", text: label).textFieldStyle(.roundedBorder).frame(width: 120)
+                TextField("liked or spotify:playlist:…", text: target).textFieldStyle(.roundedBorder)
+            }
+        }
+    }
+
     // MARK: Helpers
 
     private func section<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
@@ -176,9 +152,4 @@ struct EditView: View {
             content()
         }
     }
-}
-
-#Preview {
-    let s = Settings()
-    return EditView(settings: s, sounds: SoundPlayer(settings: s), done: {})
 }
