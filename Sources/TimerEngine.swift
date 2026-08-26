@@ -119,9 +119,16 @@ final class TimerEngine {
     /// Manual advance. A *focus* skip does NOT earn the block (matches the original).
     func skip() {
         switch phase {
-        case .idle:       return
-        case .focus:      enter(.shortBreak); onCue?(.shortBreak)
-        case .shortBreak: round = completedFocusBlocks + 1; enter(.focus); onCue?(.backToWork)
+        case .idle:
+            return
+        case .focus:
+            if round >= settings.cycles {
+                finishSession()          // skipping the final focus ends the session
+            } else {
+                enter(.shortBreak); onCue?(.shortBreak)
+            }
+        case .shortBreak:
+            round = completedFocusBlocks + 1; enter(.focus); onCue?(.backToWork)
         }
     }
 

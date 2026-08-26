@@ -67,7 +67,9 @@ struct PanelView: View {
             ForEach(0..<3, id: \.self) { i in
                 Button {
                     settings.activeSlot = i
-                    if engine.isSessionActive { music.switchSoundtrack() }
+                    // Switch live only during focus — during a break the music is paused,
+                    // so a tap just sets the slot for the next focus block.
+                    if engine.phase == .focus { music.switchSoundtrack() }
                 } label: {
                     Text(settings.slotLabels[i])
                         .font(.caption)

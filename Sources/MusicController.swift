@@ -2,37 +2,55 @@ import Foundation
 
 /// Drives spotify_player to play the focus soundtrack (incl. Liked-Songs shuffle).
 ///
-/// Lifecycle (per Keegan's spec):
-///  • session start → launch/connect, `start liked --random` (random first track,
-///    verified on 0.24.1) + ensure shuffle + duck volume
-///  • focus → break → pause;   break → focus → resume
-///  • end of cycle (or reset) → pause + restore volume; the player is LEFT open
-/// All work runs off the main thread on a serial queue.
+/// Lifecycle: session start → launch/connect + start (Liked `--random`, or a context
+/// via muted shuffle-and-skip) + duck volume; focus↔break → pause/resume; end → pause
+/// + restore volume (player left open). New player windows are moved to the configured
+/// AeroSpace workspace.
+///
+/// Concurrency: public methods are called on the main thread. They snapshot the needed
+/// Settings values there (Settings is @Observable and mutated on the main thread, so it
+/// must NOT be read from the background queue), then dispatch work to a serial queue.
+/// A generation counter lets a pause/stop cancel an in-flight `engage()` promptly, and
+/// every start path leaves the device at the focus volume even when it bails early.
 final class MusicController {
     private let settings: Settings
     private let sp = "/opt/homebrew/bin/spotify_player"
     private let aerospace = "/opt/homebrew/bin/aerospace"
     private let device = "spotify-player"
     private let queue = DispatchQueue(label: "com.keegan.flowstate.music")
-    private var savedVolume: Int?
+
+    private var savedVolume: Int?            // queue-only
+    private let genLock = NSLock()
+    private var generation = 0               // guarded by genLock
+
+    /// Immutable snapshot of the Settings the background work needs.
+    private struct Config {
+        let alwaysShuffle: Bool
+        let volume: Int
+        let workspace: Int
+        let target: String
+    }
 
     init(settings: Settings) { self.settings = settings }
 
-    // MARK: Public — called on the main thread; work is dispatched.
+    // MARK: Public (main thread) — snapshot settings, then dispatch.
 
     func startSoundtrack() {
         guard settings.playSoundtrack else { return }
-        queue.async { [weak self] in self?.engage() }
+        let cfg = snapshot(); let gen = bumpGeneration()
+        queue.async { [weak self] in self?.engage(cfg, gen) }
     }
 
     /// Switch to the currently-selected slot while a session is already playing.
     func switchSoundtrack() {
         guard settings.playSoundtrack else { return }
-        queue.async { [weak self] in self?.engage() }
+        let cfg = snapshot(); let gen = bumpGeneration()
+        queue.async { [weak self] in self?.engage(cfg, gen) }
     }
 
     func pauseForBreak() {
         guard settings.playSoundtrack else { return }
+        _ = bumpGeneration()                 // cancel any in-flight engage()
         queue.async { [weak self] in guard let self else { return }
             _ = Shell.run("\(self.sp) playback pause")
         }
@@ -45,42 +63,107 @@ final class MusicController {
         }
     }
 
-    /// End of cycle / reset — pause the music and restore the pre-session volume,
-    /// but LEAVE the player (and its terminal window) open.
+    /// End of cycle / reset — pause + restore the pre-session volume; leave the player open.
     func stopSoundtrack() {
-        queue.async { [weak self] in
-            guard let self else { return }
+        _ = bumpGeneration()                 // cancel any in-flight engage()
+        queue.async { [weak self] in guard let self else { return }
             if let v = self.savedVolume { _ = Shell.run("\(self.sp) playback volume \(v)") }
             _ = Shell.run("\(self.sp) playback pause")
             self.savedVolume = nil
         }
     }
 
-    // MARK: Sequence
+    // MARK: Snapshot + generation
 
-    private func engage() {
-        ensurePlayerRunning()
-        guard waitForDevice() else { return }
+    private func snapshot() -> Config {
+        Config(alwaysShuffle: settings.alwaysShuffle,
+               volume: settings.spotifyVolume,
+               workspace: settings.spotifyWorkspace,
+               target: settings.activeSlotTarget)
+    }
+    private func bumpGeneration() -> Int {
+        genLock.lock(); generation += 1; let g = generation; genLock.unlock(); return g
+    }
+    private func isCancelled(_ g: Int) -> Bool {
+        genLock.lock(); let c = generation != g; genLock.unlock(); return c
+    }
+
+    // MARK: Sequence (serial queue)
+
+    private func engage(_ cfg: Config, _ gen: Int) {
+        ensurePlayerRunning(workspace: cfg.workspace, gen)
+        guard !isCancelled(gen), waitForDevice(gen) else { return }
         _ = Shell.run("\(sp) connect --name \(device)")
         if savedVolume == nil { savedVolume = currentVolume() ?? 100 }
+        if isCancelled(gen) { return }
 
-        let target = settings.activeSlotTarget
-        if isLiked(target) {
-            startLiked()
-        } else if let ctx = parseContext(target) {
-            startContext(ctx)
+        if isLiked(cfg.target) {
+            startLiked(cfg, gen)
+        } else if let ctx = parseContext(cfg.target) {
+            startContext(ctx, cfg, gen)
         }
     }
 
-    private func ensurePlayerRunning() {
+    /// Liked Songs: `--random` starts on a random track directly. Volume is ducked
+    /// before playback so an early cancel never leaves it un-ducked.
+    private func startLiked(_ cfg: Config, _ gen: Int) {
+        _ = Shell.run("\(sp) playback volume \(cfg.volume)")
+        _ = Shell.run("\(sp) playback start liked --random")
+        Thread.sleep(forTimeInterval: 0.9)
+        if isCancelled(gen) { return }
+        if !isPlaying() { _ = Shell.run("\(sp) playback play") }
+        if cfg.alwaysShuffle { ensureShuffleOn() }
+    }
+
+    /// Contexts always begin at track 1 and have no `--random`. When shuffling, start
+    /// MUTED, enable shuffle, skip a few tracks to a random position, then unmute — a
+    /// varied first track with no audible blips. Commands are paced ~0.7s apart
+    /// (spotify_player drops them if fired faster). The final unmute always runs, so a
+    /// mid-sequence cancel never strands the device at volume 0.
+    private func startContext(_ ctx: (type: String, id: String), _ cfg: Config, _ gen: Int) {
+        guard cfg.alwaysShuffle else {
+            _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
+            Thread.sleep(forTimeInterval: 0.9)
+            if !isPlaying() { _ = Shell.run("\(sp) playback play") }
+            _ = Shell.run("\(sp) playback volume \(cfg.volume)")
+            return
+        }
+        _ = Shell.run("\(sp) playback volume 0")
+        Thread.sleep(forTimeInterval: 0.4)
+        _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
+        Thread.sleep(forTimeInterval: 1.2)
+        ensureShuffleOn()
+        Thread.sleep(forTimeInterval: 0.6)
+        for _ in 0..<Int.random(in: 2...5) {
+            if isCancelled(gen) { break }
+            _ = Shell.run("\(sp) playback next")
+            Thread.sleep(forTimeInterval: 0.7)
+        }
+        if !isPlaying() { _ = Shell.run("\(sp) playback play") }
+        _ = Shell.run("\(sp) playback volume \(cfg.volume)")   // always unmute
+    }
+
+    private func ensureShuffleOn() {
+        if shuffleState() == false { _ = Shell.run("\(sp) playback shuffle") }
+    }
+
+    // MARK: Launch + AeroSpace placement
+
+    private func ensurePlayerRunning(workspace: Int, _ gen: Int) {
         let running = !Shell.run("/usr/bin/pgrep -x spotify_player")
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard !running else { return }
-        // Launch the TUI in a terminal, then move that new window to the configured
-        // AeroSpace workspace (by window-id, which does not steal focus).
         let before = terminalWindowIDs()
         _ = Shell.run(#"osascript -e 'tell application "Terminal" to do script "exec /opt/homebrew/bin/spotify_player"'"#)
-        placeNewPlayerWindow(notIn: before)
+        guard workspace > 0 else { return }           // 0 = leave the window in place
+        for _ in 0..<20 {
+            if isCancelled(gen) { return }
+            if let id = terminalWindowIDs().subtracting(before).first {
+                _ = Shell.run("\(aerospace) move-node-to-workspace --window-id \(id) -- \(workspace)")
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
     }
 
     /// AeroSpace window-ids of every Terminal window (across monitors).
@@ -91,65 +174,13 @@ final class MusicController {
             .filter { !$0.isEmpty })
     }
 
-    /// Poll for the newly-opened Terminal window and move it to the player workspace.
-    private func placeNewPlayerWindow(notIn before: Set<String>) {
-        let ws = settings.spotifyWorkspace
-        guard ws > 0 else { return }               // 0 = leave the window in place
-        for _ in 0..<20 {
-            if let id = terminalWindowIDs().subtracting(before).first {
-                _ = Shell.run("\(aerospace) move-node-to-workspace --window-id \(id) -- \(ws)")
-                return
-            }
-            Thread.sleep(forTimeInterval: 0.3)
-        }
-    }
-
-    private func waitForDevice() -> Bool {
+    private func waitForDevice(_ gen: Int) -> Bool {
         for _ in 0..<60 {
+            if isCancelled(gen) { return false }
             if Shell.run("\(sp) get key devices").contains("\"name\":\"\(device)\"") { return true }
             Thread.sleep(forTimeInterval: 0.5)
         }
         return false
-    }
-
-    /// Liked Songs: `--random` starts on a random track directly (verified on 0.24.1).
-    private func startLiked() {
-        _ = Shell.run("\(sp) playback start liked --random")
-        Thread.sleep(forTimeInterval: 0.9)
-        if !isPlaying() { _ = Shell.run("\(sp) playback play") }
-        if settings.alwaysShuffle { ensureShuffleOn() }
-        _ = Shell.run("\(sp) playback volume \(settings.spotifyVolume)")
-    }
-
-    /// Playlists/albums/artists: a context always begins at track 1 and has no
-    /// `--random`. When shuffling, start MUTED, enable shuffle, skip a few tracks to a
-    /// random position, then unmute — a varied first track with no audible blips.
-    /// (Commands are paced ~0.7s apart; faster and spotify_player drops them.)
-    private func startContext(_ ctx: (type: String, id: String)) {
-        guard settings.alwaysShuffle else {
-            _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
-            Thread.sleep(forTimeInterval: 0.9)
-            if !isPlaying() { _ = Shell.run("\(sp) playback play") }
-            _ = Shell.run("\(sp) playback volume \(settings.spotifyVolume)")
-            return
-        }
-        _ = Shell.run("\(sp) playback volume 0")
-        Thread.sleep(forTimeInterval: 0.4)
-        _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
-        Thread.sleep(forTimeInterval: 1.2)
-        ensureShuffleOn()
-        Thread.sleep(forTimeInterval: 0.6)
-        for _ in 0..<Int.random(in: 2...5) {
-            _ = Shell.run("\(sp) playback next")
-            Thread.sleep(forTimeInterval: 0.7)
-        }
-        if !isPlaying() { _ = Shell.run("\(sp) playback play") }
-        _ = Shell.run("\(sp) playback volume \(settings.spotifyVolume)")
-    }
-
-    private func ensureShuffleOn() {
-        // Shuffle is a toggle — only fire it if currently off.
-        if shuffleState() == false { _ = Shell.run("\(sp) playback shuffle") }
     }
 
     // MARK: JSON reads (parsed in Swift — no jq dependency)
@@ -180,6 +211,7 @@ final class MusicController {
         if r.hasPrefix("spotify:") {
             let parts = r.split(separator: ":").map(String.init)
             if parts.count >= 3, kinds.contains(parts[1]) { return (parts[1], parts[2]) }
+            return nil   // spotify: URI of an unsupported type (track/episode/…) — reject
         }
         if r.contains("open.spotify.com") {
             let comps = r.components(separatedBy: "/")
@@ -188,6 +220,7 @@ final class MusicController {
                 if let q = id.firstIndex(of: "?") { id = String(id[..<q]) }
                 return (comps[idx], id)
             }
+            return nil   // spotify URL of an unsupported type — reject
         }
         return ("playlist", r)   // bare id → assume a playlist
     }
