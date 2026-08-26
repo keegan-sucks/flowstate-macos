@@ -2,34 +2,27 @@ import AppKit
 
 /// Plays the phase-boundary cues. macOS ships named alert sounds in
 /// /System/Library/Sounds (Glass, Submarine, Hero, Ping, Tink, …) — no bundling
-/// needed. The Edit view will expose a sound choice + volume slider per cue.
+/// needed. Reads the chosen sound + per-cue volume from Settings.
 final class SoundPlayer {
-    var enabled = true
+    private let settings: Settings
 
-    // Defaults (overridden by Settings next milestone).
-    var shortBreakSound = "Glass"
-    var backToWorkSound = "Submarine"
-    var longBreakSound  = "Hero"
+    init(settings: Settings) { self.settings = settings }
 
-    var shortBreakVolume: Float = 1.0
-    var backToWorkVolume: Float = 1.0
-    var longBreakVolume:  Float = 1.0
-
-    /// Names available in the settings picker (the classic macOS alert sounds).
+    /// Names offered in the settings picker (the classic macOS alert sounds).
     static let available = ["Basso", "Blow", "Bottle", "Frog", "Funk", "Glass",
                             "Hero", "Morse", "Ping", "Pop", "Purr", "Sosumi",
                             "Submarine", "Tink"]
 
     func play(_ cue: PhaseCue) {
-        guard enabled else { return }
+        guard settings.soundsEnabled else { return }
         switch cue {
-        case .shortBreak: play(named: shortBreakSound, volume: shortBreakVolume)
-        case .backToWork: play(named: backToWorkSound, volume: backToWorkVolume)
-        case .longBreak:  play(named: longBreakSound,  volume: longBreakVolume)
+        case .shortBreak: play(named: settings.shortBreakSound, volume: Float(settings.shortBreakVolume))
+        case .backToWork: play(named: settings.backToWorkSound, volume: Float(settings.backToWorkVolume))
+        case .longBreak:  play(named: settings.longBreakSound,  volume: Float(settings.longBreakVolume))
         }
     }
 
-    /// Also used by the settings preview buttons.
+    /// Also used by the Edit view's preview buttons.
     func play(named name: String, volume: Float) {
         guard let sound = NSSound(named: NSSound.Name(name)) else { return }
         sound.volume = max(0, min(1, volume))

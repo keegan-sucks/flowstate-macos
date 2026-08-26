@@ -9,12 +9,11 @@ enum PhaseCue: Equatable {
     case longBreak    // the final focus block ended → long break (session ends here)
 }
 
-/// The Pomodoro state machine. All live state lives here; the menu-bar label and
-/// panel are pure views of it.
+/// The Pomodoro state machine. Reads its configuration live from `Settings`, so
+/// changing durations/cycles/glyphs in the Edit view updates everything at once.
 ///
 /// Flow: focus 1 → short → focus 2 → short → … → focus `cycles`, then the session
-/// ends with a long-break *cue* (no timed long break — you rest as long as you like
-/// and start again when ready).
+/// ends with a long-break *cue* (no timed long break).
 @Observable
 final class TimerEngine {
 
@@ -22,21 +21,12 @@ final class TimerEngine {
         case idle, focus, shortBreak
     }
 
-    // MARK: - Configuration (Settings wires these next milestone)
-    var workMinutes = 25
-    var shortBreakMinutes = 5
-    var cycles = 4
-
-    /// Menu-bar glyphs. Plain monochrome TEXT glyphs — an SF Symbol rendered as an
-    /// *image* inside a MenuBarExtra text label does not draw (it shows up blank), so
-    /// we use text characters, which always render. Configurable later.
-    var focusSymbol = "⌖"      // crosshair / target
-    var breakSymbol = "☾"      // crescent — rest
+    private let settings: Settings
 
     // MARK: - Live state
     private(set) var phase: Phase = .idle
     private(set) var round = 1
-    private(set) var remaining = 25 * 60
+    private(set) var remaining = 0
     private(set) var isRunning = false
 
     /// Fired at each phase boundary so the app can play a sound. nil in tests.
@@ -45,35 +35,41 @@ final class TimerEngine {
     private var completedFocusBlocks = 0
     private var ticker: Timer?
 
-    init() { remaining = duration(for: .focus) }
+    init(settings: Settings) {
+        self.settings = settings
+        remaining = duration(for: .focus)
+    }
 
     // MARK: - Derived display
 
     var clockText: String {
-        String(format: "%d:%02d", remaining / 60, remaining % 60)
+        // Idle reflects the (possibly just-edited) focus duration; otherwise the countdown.
+        let secs = (phase == .idle) ? settings.workMinutes * 60 : remaining
+        return String(format: "%d:%02d", secs / 60, secs % 60)
     }
 
     var phaseLabel: String {
         switch phase {
         case .idle:       return "Ready"
-        case .focus:      return "Focus \(round) of \(cycles)"
+        case .focus:      return "Focus \(round) of \(settings.cycles)"
         case .shortBreak: return "Short break"
         }
     }
 
-    /// SF Symbol shown in the menu bar for the current phase.
+    /// Text glyph shown in the menu bar for the current phase.
     var menuBarSymbol: String {
         switch phase {
-        case .idle, .focus: return focusSymbol
-        case .shortBreak:   return breakSymbol
+        case .idle, .focus: return settings.focusGlyph
+        case .shortBreak:   return settings.breakGlyph
         }
     }
 
     /// Filled/empty round dots for the menu bar and panel, e.g. `●●○○`.
     var dotsText: String {
-        let filled = min(max(0, filledDots), cycles)
+        let total = max(1, settings.cycles)
+        let filled = min(max(0, filledDots), total)
         return String(repeating: "●", count: filled)
-             + String(repeating: "○", count: cycles - filled)
+             + String(repeating: "○", count: total - filled)
     }
 
     private var filledDots: Int {
@@ -130,8 +126,8 @@ final class TimerEngine {
         case .idle:
             return
         case .focus:
-            completedFocusBlocks = min(cycles, completedFocusBlocks + 1)
-            if completedFocusBlocks >= cycles {
+            completedFocusBlocks = min(settings.cycles, completedFocusBlocks + 1)
+            if completedFocusBlocks >= settings.cycles {
                 finishSession()          // no timed long break — just the cue
                 onCue?(.longBreak)
             } else {
@@ -176,8 +172,8 @@ final class TimerEngine {
 
     private func duration(for phase: Phase) -> Int {
         switch phase {
-        case .idle, .focus: return workMinutes * 60
-        case .shortBreak:   return shortBreakMinutes * 60
+        case .idle, .focus: return settings.workMinutes * 60
+        case .shortBreak:   return settings.shortBreakMinutes * 60
         }
     }
 

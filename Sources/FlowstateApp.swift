@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct FlowstateApp: App {
+    @State private var settings: Settings
     @State private var engine: TimerEngine
     @State private var sounds: SoundPlayer
 
@@ -9,16 +10,19 @@ struct FlowstateApp: App {
         // Menu-bar accessory: no Dock icon, even during debug runs.
         NSApplication.shared.setActivationPolicy(.accessory)
 
-        let s = SoundPlayer()
-        let e = TimerEngine()
-        e.onCue = { [s] cue in s.play(cue) }
+        let s = Settings()
+        let snd = SoundPlayer(settings: s)
+        let e = TimerEngine(settings: s)
+        e.onCue = { [snd] cue in snd.play(cue) }
+
+        _settings = State(initialValue: s)
+        _sounds = State(initialValue: snd)
         _engine = State(initialValue: e)
-        _sounds = State(initialValue: s)
     }
 
     var body: some Scene {
         MenuBarExtra {
-            PanelView(engine: engine)
+            RootView(engine: engine, settings: settings, sounds: sounds)
         } label: {
             // Headline feature: focus glyph + round dots + clock, live in the menu bar.
             menuBarLabel
