@@ -1,30 +1,57 @@
 import SwiftUI
 
-/// Settings — shown in a proper resizable macOS Settings window: durations, cycles,
-/// menu-bar glyphs, per-cue sounds, and the Spotify soundtrack.
+/// The ⚙ settings view, shown in the menu-bar panel: durations, cycles, menu-bar
+/// glyphs, per-cue sounds, and the Spotify soundtrack.
 struct EditView: View {
     @Bindable var settings: Settings
     let sounds: SoundPlayer
+    var done: () -> Void
 
     private let focusGlyphs = ["⌖", "◉", "◎", "⧗", "✦", "◆", "●"]
     private let breakGlyphs = ["☾", "◐", "◑", "✦", "○", "◇", "◦"]
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 22) {
-                timerSection
-                glyphSection
-                soundSection
-                soundtrackSection
-                Divider()
-                Button("Quit Flowstate") { NSApplication.shared.terminate(nil) }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.secondary)
+        VStack(spacing: 0) {
+            header
+            Divider()
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    timerSection
+                    glyphSection
+                    soundSection
+                    soundtrackSection
+                }
+                .padding(16)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxHeight: 480)
+            Divider()
+            footer
         }
-        .frame(minWidth: 460, idealWidth: 500, minHeight: 520, idealHeight: 780)
+        .frame(width: 340)
+    }
+
+    // MARK: Header / footer
+
+    private var header: some View {
+        HStack {
+            Text("Settings").font(.headline)
+            Spacer()
+            Button("Done", action: done)
+                .keyboardShortcut(.cancelAction)   // Esc
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+    }
+
+    private var footer: some View {
+        HStack {
+            Button("Quit Flowstate") { NSApplication.shared.terminate(nil) }
+                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
     }
 
     // MARK: Sections
@@ -57,7 +84,6 @@ struct EditView: View {
     private var soundtrackSection: some View {
         section("Soundtrack") {
             Toggle("Play soundtrack during focus", isOn: $settings.playSoundtrack)
-            Toggle("Notify on song change", isOn: $settings.notifyNowPlaying)
 
             HStack {
                 Text("Focus volume")
@@ -109,7 +135,7 @@ struct EditView: View {
     private func soundRow(_ label: String, sound: Binding<String>, volume: Binding<Double>) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text(label).frame(width: 100, alignment: .leading)
+                Text(label).frame(width: 96, alignment: .leading)
                 Picker("", selection: sound) {
                     ForEach(SoundPlayer.available, id: \.self) { Text($0).tag($0) }
                 }
@@ -134,10 +160,8 @@ struct EditView: View {
     private func slotEditor(_ title: String, label: Binding<String>, target: Binding<String>) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title).font(.caption).foregroundStyle(.secondary)
-            HStack(spacing: 6) {
-                TextField("Label", text: label).textFieldStyle(.roundedBorder).frame(width: 120)
-                TextField("liked or spotify:playlist:…", text: target).textFieldStyle(.roundedBorder)
-            }
+            TextField("Label", text: label).textFieldStyle(.roundedBorder)
+            TextField("liked or spotify:playlist:…", text: target).textFieldStyle(.roundedBorder)
         }
     }
 

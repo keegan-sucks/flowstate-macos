@@ -1,49 +1,48 @@
 import SwiftUI
 
 /// The main menu-bar panel: round dots, phase, clock, transport, soundtrack slots,
-/// and a ⚙ that opens the Settings window.
+/// and a ⚙ that opens the Edit view. Keyboard: Space toggle · R reset · S skip · E edit.
 struct PanelView: View {
     let engine: TimerEngine
     let settings: Settings
     let music: MusicController
-    @Environment(\.openSettings) private var openSettings
+    var edit: () -> Void
 
     var body: some View {
-        VStack(spacing: 12) {
+        VStack(spacing: 14) {
             HStack {
                 Spacer()
-                Button {
-                    openSettings()
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                } label: {
-                    Image(systemName: "gearshape")
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .help("Settings")
+                Button(action: edit) { Image(systemName: "gearshape") }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.secondary)
+                    .keyboardShortcut("e", modifiers: [])
+                    .help("Edit settings (E)")
             }
 
             // Round dots — reads at a glance: ●●○○
             Text(engine.dotsText)
-                .font(.system(size: 13))
-                .tracking(5)
+                .font(.system(size: 14))
+                .tracking(6)
                 .foregroundStyle(.primary)
 
-            VStack(spacing: 2) {
+            VStack(spacing: 3) {
                 Text(engine.phaseLabel)
-                    .font(.subheadline)
+                    .font(.caption)
+                    .textCase(.uppercase)
+                    .tracking(1.2)
                     .foregroundStyle(.secondary)
                 Text(engine.clockText)
-                    .font(.system(size: 46, weight: .semibold, design: .rounded))
+                    .font(.system(size: 48, weight: .medium, design: .rounded))
                     .monospacedDigit()
                     .contentTransition(.numericText())
             }
 
             HStack(spacing: 10) {
                 Button(action: engine.reset) {
-                    Image(systemName: "arrow.counterclockwise").frame(width: 28, height: 20)
+                    Image(systemName: "arrow.counterclockwise").frame(width: 30, height: 22)
                 }
-                .help("Reset")
+                .keyboardShortcut("r", modifiers: [])
+                .help("Reset (R)")
 
                 Button(action: engine.toggle) {
                     Label(engine.isRunning ? "Pause" : "Start",
@@ -51,11 +50,14 @@ struct PanelView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.space, modifiers: [])
+                .help("Start / Pause (Space)")
 
                 Button(action: engine.skip) {
-                    Image(systemName: "forward.fill").frame(width: 28, height: 20)
+                    Image(systemName: "forward.fill").frame(width: 30, height: 22)
                 }
-                .help("Skip")
+                .keyboardShortcut("s", modifiers: [])
+                .help("Skip (S)")
             }
 
             soundtrackRow
@@ -63,7 +65,7 @@ struct PanelView: View {
         .padding(.horizontal, 18)
         .padding(.top, 10)
         .padding(.bottom, 16)
-        .frame(width: 264)
+        .frame(width: 268)
     }
 
     /// Soundtrack slots — tap to select (and switch live if a focus block is playing).
@@ -72,8 +74,6 @@ struct PanelView: View {
             ForEach(0..<3, id: \.self) { i in
                 Button {
                     settings.activeSlot = i
-                    // Switch live only during focus — during a break the music is paused,
-                    // so a tap just sets the slot for the next focus block.
                     if engine.phase == .focus { music.switchSoundtrack() }
                 } label: {
                     Text(settings.slotLabels[i])

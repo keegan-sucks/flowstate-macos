@@ -23,10 +23,6 @@ final class MusicController {
     private let genLock = NSLock()
     private var generation = 0               // guarded by genLock
 
-    private let monitorQueue = DispatchQueue(label: "com.keegan.flowstate.music.monitor")
-    private var monitorTimer: DispatchSourceTimer?   // main-thread only
-    private var lastTrackId: String?                 // monitorQueue only
-
     /// Immutable snapshot of the Settings the background work needs.
     private struct Config {
         let alwaysShuffle: Bool
@@ -42,7 +38,6 @@ final class MusicController {
     func startSoundtrack() {
         guard settings.playSoundtrack else { return }
         let cfg = snapshot(); let gen = bumpGeneration()
-        startMonitor()
         queue.async { [weak self] in self?.engage(cfg, gen) }
     }
 
@@ -70,7 +65,6 @@ final class MusicController {
 
     /// End of cycle / reset — pause + restore the pre-session volume; leave the player open.
     func stopSoundtrack() {
-        stopMonitor()
         _ = bumpGeneration()                 // cancel any in-flight engage()
         queue.async { [weak self] in guard let self else { return }
             if let v = self.savedVolume { _ = Shell.run("\(self.sp) playback volume \(v)") }
@@ -201,43 +195,6 @@ final class MusicController {
     private func shuffleState() -> Bool? { playbackJSON()?["shuffle_state"] as? Bool }
     private func currentVolume() -> Int? {
         (playbackJSON()?["device"] as? [String: Any])?["volume_percent"] as? Int
-    }
-
-    // MARK: Now-playing notifications
-
-    private func startMonitor() {
-        guard settings.notifyNowPlaying else { return }
-        stopMonitor()
-        monitorQueue.async { [weak self] in self?.lastTrackId = nil }
-        let t = DispatchSource.makeTimerSource(queue: monitorQueue)
-        t.schedule(deadline: .now() + 2, repeating: 2)
-        t.setEventHandler { [weak self] in self?.checkNowPlaying() }
-        monitorTimer = t
-        t.resume()
-    }
-
-    private func stopMonitor() {
-        monitorTimer?.cancel()
-        monitorTimer = nil
-    }
-
-    /// Runs on monitorQueue; notifies once per track change while actually playing.
-    private func checkNowPlaying() {
-        guard let j = playbackJSON(), (j["is_playing"] as? Bool) == true,
-              let item = j["item"] as? [String: Any],
-              let id = item["id"] as? String, id != lastTrackId else { return }
-        lastTrackId = id
-        let name = (item["name"] as? String) ?? "Now Playing"
-        let artist = (item["artists"] as? [[String: Any]])?
-            .compactMap { $0["name"] as? String }.joined(separator: ", ") ?? ""
-        // Sanitize so the strings can't break out of the AppleScript literal.
-        func safe(_ s: String) -> String {
-            s.replacingOccurrences(of: "\\", with: " ")
-             .replacingOccurrences(of: "\"", with: " ")
-             .replacingOccurrences(of: "'", with: "\u{2019}")
-             .replacingOccurrences(of: "\n", with: " ")
-        }
-        _ = Shell.run("osascript -e 'display notification \"\(safe(artist))\" with title \"\u{266A} \(safe(name))\"'")
     }
 
     // MARK: Target parsing (spotify:TYPE:ID | open.spotify.com/…/TYPE/ID | liked | bare id)
