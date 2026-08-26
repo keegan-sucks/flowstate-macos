@@ -62,9 +62,13 @@ final class MusicController {
         guard waitForDevice() else { return }
         _ = Shell.run("\(sp) connect --name \(device)")
         if savedVolume == nil { savedVolume = currentVolume() ?? 100 }
-        startTarget()
-        if settings.alwaysShuffle { ensureShuffleOn() }
-        _ = Shell.run("\(sp) playback volume \(settings.spotifyVolume)")
+
+        let target = settings.activeSlotTarget
+        if isLiked(target) {
+            startLiked()
+        } else if let ctx = parseContext(target) {
+            startContext(ctx)
+        }
     }
 
     private func ensurePlayerRunning() {
@@ -83,18 +87,39 @@ final class MusicController {
         return false
     }
 
-    private func startTarget() {
-        let target = settings.activeSlotTarget
-        if isLiked(target) {
-            // `--random` picks a RANDOM starting track (verified on 0.24.1) — no fixed
-            // first song. Shuffle is ensured separately for continued playback.
-            _ = Shell.run("\(sp) playback start liked --random")
-        } else if let ctx = parseContext(target) {
-            let shuffle = settings.alwaysShuffle ? " --shuffle" : ""
-            _ = Shell.run("\(sp) playback start context --id \(ctx.id)\(shuffle) \(ctx.type)")
-        }
-        Thread.sleep(forTimeInterval: 1.0)
+    /// Liked Songs: `--random` starts on a random track directly (verified on 0.24.1).
+    private func startLiked() {
+        _ = Shell.run("\(sp) playback start liked --random")
+        Thread.sleep(forTimeInterval: 0.9)
         if !isPlaying() { _ = Shell.run("\(sp) playback play") }
+        if settings.alwaysShuffle { ensureShuffleOn() }
+        _ = Shell.run("\(sp) playback volume \(settings.spotifyVolume)")
+    }
+
+    /// Playlists/albums/artists: a context always begins at track 1 and has no
+    /// `--random`. When shuffling, start MUTED, enable shuffle, skip a few tracks to a
+    /// random position, then unmute — a varied first track with no audible blips.
+    /// (Commands are paced ~0.7s apart; faster and spotify_player drops them.)
+    private func startContext(_ ctx: (type: String, id: String)) {
+        guard settings.alwaysShuffle else {
+            _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
+            Thread.sleep(forTimeInterval: 0.9)
+            if !isPlaying() { _ = Shell.run("\(sp) playback play") }
+            _ = Shell.run("\(sp) playback volume \(settings.spotifyVolume)")
+            return
+        }
+        _ = Shell.run("\(sp) playback volume 0")
+        Thread.sleep(forTimeInterval: 0.4)
+        _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
+        Thread.sleep(forTimeInterval: 1.2)
+        ensureShuffleOn()
+        Thread.sleep(forTimeInterval: 0.6)
+        for _ in 0..<Int.random(in: 2...5) {
+            _ = Shell.run("\(sp) playback next")
+            Thread.sleep(forTimeInterval: 0.7)
+        }
+        if !isPlaying() { _ = Shell.run("\(sp) playback play") }
+        _ = Shell.run("\(sp) playback volume \(settings.spotifyVolume)")
     }
 
     private func ensureShuffleOn() {
