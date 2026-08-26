@@ -1,0 +1,18 @@
+name: Flowstate
+options:
+  bundleIdPrefix: com.keegan            # change to your own reverse-DNS if you prefer
+  deploymentTarget:
+    macOS: "14.0"                       # 14+ gives us MenuBarExtra + .onKeyPress
+targets:
+  Flowstate:
+    type: application
+    platform: macOS
+    sources: [Sources]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.keegan.flowstate
+        MARKETING_VERSION: "1.0"
+        GENERATE_INFOPLIST_FILE: true
+        # Tells macOS this is a menu-bar accessory (no Dock icon):
+        INFOPLIST_KEY_LSUIElement: true
+        ENABLE_APP_SANDBOX: false       # we shell out to spotify_player, aerospace, osascript
