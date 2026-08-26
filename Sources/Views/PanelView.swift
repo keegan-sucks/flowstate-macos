@@ -68,7 +68,7 @@ struct PanelView: View {
         .frame(width: 268)
     }
 
-    /// Soundtrack slots — tap to select (and switch live if a focus block is playing).
+    /// Soundtrack slots (tap to select; switch live during focus) + a skip-song button.
     private var soundtrackRow: some View {
         HStack(spacing: 6) {
             ForEach(0..<3, id: \.self) { i in
@@ -84,6 +84,13 @@ struct PanelView: View {
                 .buttonStyle(.bordered)
                 .tint(settings.activeSlot == i ? .accentColor : .secondary)
             }
+
+            Button(action: music.nextTrack) {
+                Image(systemName: "forward.end.fill")
+            }
+            .buttonStyle(.bordered)
+            .keyboardShortcut("n", modifiers: [])
+            .help("Skip song (N)")
         }
         .opacity(settings.playSoundtrack ? 1 : 0.4)
     }

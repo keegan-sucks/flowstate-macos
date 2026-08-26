@@ -63,6 +63,14 @@ final class MusicController {
         }
     }
 
+    /// Skip the current soundtrack song (not the Pomodoro phase).
+    func nextTrack() {
+        guard settings.playSoundtrack else { return }
+        queue.async { [weak self] in guard let self else { return }
+            _ = Shell.run("\(self.sp) playback next")
+        }
+    }
+
     /// End of cycle / reset — pause + restore the pre-session volume; leave the player open.
     func stopSoundtrack() {
         _ = bumpGeneration()                 // cancel any in-flight engage()

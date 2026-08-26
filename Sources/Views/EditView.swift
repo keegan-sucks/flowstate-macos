@@ -7,6 +7,8 @@ struct EditView: View {
     let sounds: SoundPlayer
     var done: () -> Void
 
+    @State private var launchAtLogin = LoginItem.isEnabled
+
     private let focusGlyphs = ["⌖", "◉", "◎", "⧗", "✦", "◆", "●"]
     private let breakGlyphs = ["☾", "◐", "◑", "✦", "○", "◇", "◦"]
 
@@ -16,6 +18,7 @@ struct EditView: View {
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
+                    generalSection
                     timerSection
                     glyphSection
                     soundSection
@@ -55,6 +58,15 @@ struct EditView: View {
     }
 
     // MARK: Sections
+
+    private var generalSection: some View {
+        section("General") {
+            Toggle("Launch at login", isOn: $launchAtLogin)
+                .onChange(of: launchAtLogin) { _, on in
+                    if !LoginItem.setEnabled(on) { launchAtLogin = LoginItem.isEnabled }
+                }
+        }
+    }
 
     private var timerSection: some View {
         section("Timer") {
