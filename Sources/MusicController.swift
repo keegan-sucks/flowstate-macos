@@ -11,6 +11,7 @@ import Foundation
 final class MusicController {
     private let settings: Settings
     private let sp = "/opt/homebrew/bin/spotify_player"
+    private let aerospace = "/opt/homebrew/bin/aerospace"
     private let device = "spotify-player"
     private let queue = DispatchQueue(label: "com.keegan.flowstate.music")
     private var savedVolume: Int?
@@ -75,8 +76,32 @@ final class MusicController {
         let running = !Shell.run("/usr/bin/pgrep -x spotify_player")
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         guard !running else { return }
-        // Launch the TUI in a terminal (Milestone 5 moves it to the configured workspace).
+        // Launch the TUI in a terminal, then move that new window to the configured
+        // AeroSpace workspace (by window-id, which does not steal focus).
+        let before = terminalWindowIDs()
         _ = Shell.run(#"osascript -e 'tell application "Terminal" to do script "exec /opt/homebrew/bin/spotify_player"'"#)
+        placeNewPlayerWindow(notIn: before)
+    }
+
+    /// AeroSpace window-ids of every Terminal window (across monitors).
+    private func terminalWindowIDs() -> Set<String> {
+        let out = Shell.run("\(aerospace) list-windows --monitor all --app-bundle-id com.apple.Terminal --format '%{window-id}'")
+        return Set(out.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty })
+    }
+
+    /// Poll for the newly-opened Terminal window and move it to the player workspace.
+    private func placeNewPlayerWindow(notIn before: Set<String>) {
+        let ws = settings.spotifyWorkspace
+        guard ws > 0 else { return }               // 0 = leave the window in place
+        for _ in 0..<20 {
+            if let id = terminalWindowIDs().subtracting(before).first {
+                _ = Shell.run("\(aerospace) move-node-to-workspace --window-id \(id) -- \(ws)")
+                return
+            }
+            Thread.sleep(forTimeInterval: 0.3)
+        }
     }
 
     private func waitForDevice() -> Bool {

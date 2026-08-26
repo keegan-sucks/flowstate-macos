@@ -35,6 +35,7 @@ final class Settings {
     var slot2Target: String     { didSet { d.set(slot2Target, forKey: "slot2Target") } }
     var slot3Label: String      { didSet { d.set(slot3Label, forKey: "slot3Label") } }
     var slot3Target: String     { didSet { d.set(slot3Target, forKey: "slot3Target") } }
+    var spotifyWorkspace: Int   { didSet { d.set(spotifyWorkspace, forKey: "spotifyWorkspace") } }
 
     // MARK: Derived
     var slotLabels: [String]  { [slot1Label, slot2Label, slot3Label] }
@@ -76,5 +77,6 @@ final class Settings {
         slot2Target       = s("slot2Target", "spotify:playlist:37i9dQZF1DX4PP3DA4J0N8")
         slot3Label        = s("slot3Label", "Liked")
         slot3Target       = s("slot3Target", "liked")
+        spotifyWorkspace  = i("spotifyWorkspace", 9)             // 0 = leave in place
     }
 }

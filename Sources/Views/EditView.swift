@@ -23,7 +23,7 @@ struct EditView: View {
                 }
                 .padding(18)
             }
-            .frame(maxHeight: 700)
+            .frame(maxHeight: 840)
             Divider()
             footer
         }
@@ -94,6 +94,8 @@ struct EditView: View {
                    in: 0...100)
 
             Toggle("Always shuffle", isOn: $settings.alwaysShuffle)
+
+            stepperRow("Player workspace (0 = leave in place)", value: $settings.spotifyWorkspace, range: 0...20, unit: nil)
 
             slotEditor("Slot 1", label: $settings.slot1Label, target: $settings.slot1Target)
             slotEditor("Slot 2", label: $settings.slot2Label, target: $settings.slot2Target)
