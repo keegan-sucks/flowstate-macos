@@ -1,51 +1,51 @@
 import Foundation
 import Observation
 
-/// The Pomodoro state machine. All live state (phase, round, seconds remaining)
-/// lives here; the menu-bar title and panel are pure views of it.
+/// Distinct audible cues at phase boundaries. The engine only *signals* these;
+/// SoundPlayer (AppKit) decides what actually plays, so the engine stays testable.
+enum PhaseCue: Equatable {
+    case shortBreak   // a focus block ended → time for a short break
+    case backToWork   // a short break ended → get back to work
+    case longBreak    // the final focus block ended → long break (session ends here)
+}
+
+/// The Pomodoro state machine. All live state lives here; the menu-bar label and
+/// panel are pure views of it.
 ///
-/// Flow (mirrors the original Flowstate, per the brief's §2):
-///   focus 1 → short → focus 2 → short → … → focus `cycles` → long break → done.
-/// After the `cycles`-th focus block the break is the *long* one; when it ends the
-/// session finishes and everything resets to idle.
+/// Flow: focus 1 → short → focus 2 → short → … → focus `cycles`, then the session
+/// ends with a long-break *cue* (no timed long break — you rest as long as you like
+/// and start again when ready).
 @Observable
 final class TimerEngine {
 
-    enum Phase {
-        case idle, focus, shortBreak, longBreak
+    enum Phase: Equatable {
+        case idle, focus, shortBreak
     }
 
-    // MARK: - Configuration
-    // Defaults here; Milestone 3 wires these to persisted Settings.
+    // MARK: - Configuration (Settings wires these next milestone)
     var workMinutes = 25
     var shortBreakMinutes = 5
-    var longBreakMinutes = 15
     var cycles = 4
+
+    /// Menu-bar glyphs (SF Symbols — monochrome in the menu bar). Configurable later.
+    var focusSymbol = "target"
+    var breakSymbol = "cup.and.saucer.fill"
 
     // MARK: - Live state
     private(set) var phase: Phase = .idle
-    private(set) var round = 1          // 1-based index of the current focus block
+    private(set) var round = 1
     private(set) var remaining = 25 * 60
     private(set) var isRunning = false
+
+    /// Fired at each phase boundary so the app can play a sound. nil in tests.
+    var onCue: ((PhaseCue) -> Void)?
 
     private var completedFocusBlocks = 0
     private var ticker: Timer?
 
-    init() {
-        remaining = duration(for: .focus)
-    }
+    init() { remaining = duration(for: .focus) }
 
     // MARK: - Derived display
-
-    /// The headline feature: the current round + clock, live in the menu bar.
-    var menuBarTitle: String {
-        switch phase {
-        case .idle:       return "🍅"
-        case .focus:      return "🍅 \(round)/\(cycles) · \(clockText)"
-        case .shortBreak: return "☕ \(round)/\(cycles) · \(clockText)"
-        case .longBreak:  return "🌙 · \(clockText)"
-        }
-    }
 
     var clockText: String {
         String(format: "%d:%02d", remaining / 60, remaining % 60)
@@ -56,11 +56,18 @@ final class TimerEngine {
         case .idle:       return "Ready"
         case .focus:      return "Focus \(round) of \(cycles)"
         case .shortBreak: return "Short break"
-        case .longBreak:  return "Long break"
         }
     }
 
-    /// Filled/empty round dots, e.g. `●●○○`.
+    /// SF Symbol shown in the menu bar for the current phase.
+    var menuBarSymbol: String {
+        switch phase {
+        case .idle, .focus: return focusSymbol
+        case .shortBreak:   return breakSymbol
+        }
+    }
+
+    /// Filled/empty round dots for the menu bar and panel, e.g. `●●○○`.
     var dotsText: String {
         let filled = min(max(0, filledDots), cycles)
         return String(repeating: "●", count: filled)
@@ -69,9 +76,9 @@ final class TimerEngine {
 
     private var filledDots: Int {
         switch phase {
-        case .idle:                   return 0
-        case .focus:                  return round               // current block counts as lit
-        case .shortBreak, .longBreak: return completedFocusBlocks
+        case .idle:       return 0
+        case .focus:      return round               // current block counts as lit
+        case .shortBreak: return completedFocusBlocks
         }
     }
 
@@ -88,7 +95,7 @@ final class TimerEngine {
         guard isRunning else { return }
         isRunning = false
         stopTicker()
-        // The music side-effect intentionally stays engaged while paused (M4).
+        // Music side-effect intentionally stays engaged while paused (M5).
     }
 
     func toggle() { isRunning ? pause() : start() }
@@ -100,16 +107,15 @@ final class TimerEngine {
         round = 1
         completedFocusBlocks = 0
         remaining = duration(for: .focus)
-        // M4: stop music + restore volume once, here.
+        // M5: stop music + restore volume.
     }
 
-    /// Manual advance. On a *focus* skip the block is NOT earned (matches the original).
+    /// Manual advance. A *focus* skip does NOT earn the block (matches the original).
     func skip() {
         switch phase {
         case .idle:       return
-        case .focus:      enter(.shortBreak)
-        case .shortBreak: round = completedFocusBlocks + 1; enter(.focus)
-        case .longBreak:  finishSession()
+        case .focus:      enter(.shortBreak); onCue?(.shortBreak)
+        case .shortBreak: round = completedFocusBlocks + 1; enter(.focus); onCue?(.backToWork)
         }
     }
 
@@ -123,14 +129,17 @@ final class TimerEngine {
             return
         case .focus:
             completedFocusBlocks = min(cycles, completedFocusBlocks + 1)
-            enter(completedFocusBlocks >= cycles ? .longBreak : .shortBreak)
-            // M6: playPhaseBell()
+            if completedFocusBlocks >= cycles {
+                finishSession()          // no timed long break — just the cue
+                onCue?(.longBreak)
+            } else {
+                enter(.shortBreak)
+                onCue?(.shortBreak)
+            }
         case .shortBreak:
             round = completedFocusBlocks + 1
             enter(.focus)
-            // M6: playPhaseBell()
-        case .longBreak:
-            finishSession()   // M6: playCompletionSequence()
+            onCue?(.backToWork)
         }
     }
 
@@ -143,19 +152,15 @@ final class TimerEngine {
         remaining = duration(for: .focus)
         isRunning = true
         startTicker()
-        // M4: fire the music side-effect once, here.
+        // M5: fire the music side-effect once, here.
     }
 
-    private func resume() {
-        isRunning = true
-        startTicker()
-    }
+    private func resume() { isRunning = true; startTicker() }
 
-    /// Enter a new phase, carrying the running state (continuous auto-advance).
     private func enter(_ newPhase: Phase) {
         phase = newPhase
         remaining = duration(for: newPhase)
-        // isRunning is deliberately unchanged; the existing ticker keeps counting.
+        // isRunning unchanged; the existing ticker keeps counting (continuous advance).
     }
 
     private func finishSession() {
@@ -165,14 +170,12 @@ final class TimerEngine {
         round = 1
         completedFocusBlocks = 0
         remaining = duration(for: .focus)
-        // M4: stop music + restore volume.  M6: 3-bell completion chime.
     }
 
     private func duration(for phase: Phase) -> Int {
         switch phase {
         case .idle, .focus: return workMinutes * 60
         case .shortBreak:   return shortBreakMinutes * 60
-        case .longBreak:    return longBreakMinutes * 60
         }
     }
 
@@ -180,24 +183,17 @@ final class TimerEngine {
 
     private func startTicker() {
         stopTicker()
-        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
-            self?.tick()
-        }
+        let t = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.tick() }
         // .common so the countdown keeps running while the panel/menu is open.
         RunLoop.main.add(t, forMode: .common)
         ticker = t
     }
 
-    private func stopTicker() {
-        ticker?.invalidate()
-        ticker = nil
-    }
+    private func stopTicker() { ticker?.invalidate(); ticker = nil }
 
     private func tick() {
         guard isRunning else { return }
         remaining -= 1
-        if remaining <= 0 {
-            completeCurrentPhase()
-        }
+        if remaining <= 0 { completeCurrentPhase() }
     }
 }

@@ -3,20 +3,32 @@ import SwiftUI
 @main
 struct FlowstateApp: App {
     @State private var engine: TimerEngine
+    @State private var sounds: SoundPlayer
 
     init() {
         // Menu-bar accessory: no Dock icon, even during debug runs.
         NSApplication.shared.setActivationPolicy(.accessory)
-        _engine = State(initialValue: TimerEngine())
+
+        let s = SoundPlayer()
+        let e = TimerEngine()
+        e.onCue = { [s] cue in s.play(cue) }
+        _engine = State(initialValue: e)
+        _sounds = State(initialValue: s)
     }
 
     var body: some Scene {
         MenuBarExtra {
             PanelView(engine: engine)
         } label: {
-            // The headline feature: current round + clock, live in the menu bar.
-            Text(engine.menuBarTitle)
+            // Headline feature: focus glyph + round dots + clock, live in the menu bar.
+            menuBarLabel
         }
-        .menuBarExtraStyle(.window)   // a real panel, not a dropdown menu
+        .menuBarExtraStyle(.window)
+    }
+
+    private var menuBarLabel: Text {
+        let symbol = Text("\(Image(systemName: engine.menuBarSymbol))")
+        if engine.phase == .idle { return symbol }
+        return symbol + Text("  \(engine.dotsText)  \(engine.clockText)")
     }
 }

@@ -11,7 +11,7 @@ struct PanelView: View {
             Text(engine.dotsText)
                 .font(.system(size: 13))
                 .tracking(5)
-                .foregroundStyle(accent)
+                .foregroundStyle(.primary)
 
             VStack(spacing: 2) {
                 Text(engine.phaseLabel)
@@ -36,7 +36,6 @@ struct PanelView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(accent)
 
                 Button(action: engine.skip) {
                     Image(systemName: "forward.fill")
@@ -47,15 +46,6 @@ struct PanelView: View {
         }
         .padding(18)
         .frame(width: 264)
-    }
-
-    /// Calm accent that tracks the phase: focus red, breaks green/blue.
-    private var accent: Color {
-        switch engine.phase {
-        case .idle, .focus: return .red
-        case .shortBreak:   return .green
-        case .longBreak:    return .indigo
-        }
     }
 }
 
