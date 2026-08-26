@@ -15,19 +15,19 @@ struct EditView: View {
             header
             Divider()
             ScrollView {
-                VStack(alignment: .leading, spacing: 20) {
+                VStack(alignment: .leading, spacing: 16) {
                     timerSection
                     glyphSection
                     soundSection
                     soundtrackSection
                 }
-                .padding(16)
+                .padding(18)
             }
-            .frame(maxHeight: 440)
+            .frame(maxHeight: 700)
             Divider()
             footer
         }
-        .frame(width: 330)
+        .frame(width: 460)
     }
 
     // MARK: Header / footer

@@ -2,10 +2,12 @@ import Foundation
 
 /// Drives spotify_player to play the focus soundtrack (incl. Liked-Songs shuffle).
 ///
-/// Verified command chain: ensure a running instance → wait for the "spotify-player"
-/// device → connect → capture current volume → start liked/context → ensure shuffle
-/// (a toggle, so read-then-fire) → duck volume. On stop: restore volume → pause.
-/// All work runs off the main thread.
+/// Lifecycle (per Keegan's spec):
+///  • session start → launch/connect, `start liked --random` (random first track,
+///    verified on 0.24.1) + ensure shuffle + duck volume
+///  • focus → break → pause;   break → focus → resume
+///  • end of cycle (or reset) → pause + restore volume; the player is LEFT open
+/// All work runs off the main thread on a serial queue.
 final class MusicController {
     private let settings: Settings
     private let sp = "/opt/homebrew/bin/spotify_player"
@@ -15,46 +17,55 @@ final class MusicController {
 
     init(settings: Settings) { self.settings = settings }
 
-    // MARK: Public — called on the main thread; work is dispatched to a serial queue.
+    // MARK: Public — called on the main thread; work is dispatched.
 
     func startSoundtrack() {
         guard settings.playSoundtrack else { return }
-        queue.async { [weak self] in self?.engage(captureVolume: true) }
-    }
-
-    func stopSoundtrack() {
-        queue.async { [weak self] in self?.disengage() }
+        queue.async { [weak self] in self?.engage() }
     }
 
     /// Switch to the currently-selected slot while a session is already playing.
     func switchSoundtrack() {
         guard settings.playSoundtrack else { return }
-        queue.async { [weak self] in self?.engage(captureVolume: false) }
+        queue.async { [weak self] in self?.engage() }
+    }
+
+    func pauseForBreak() {
+        guard settings.playSoundtrack else { return }
+        queue.async { [weak self] in guard let self else { return }
+            _ = Shell.run("\(self.sp) playback pause")
+        }
+    }
+
+    func resumeFromBreak() {
+        guard settings.playSoundtrack else { return }
+        queue.async { [weak self] in guard let self else { return }
+            _ = Shell.run("\(self.sp) playback play")
+        }
+    }
+
+    /// End of cycle / reset — pause the music and restore the pre-session volume,
+    /// but LEAVE the player (and its terminal window) open.
+    func stopSoundtrack() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            if let v = self.savedVolume { _ = Shell.run("\(self.sp) playback volume \(v)") }
+            _ = Shell.run("\(self.sp) playback pause")
+            self.savedVolume = nil
+        }
     }
 
     // MARK: Sequence
 
-    private func engage(captureVolume: Bool) {
+    private func engage() {
         ensurePlayerRunning()
         guard waitForDevice() else { return }
         _ = Shell.run("\(sp) connect --name \(device)")
-
-        if captureVolume, savedVolume == nil {
-            savedVolume = currentVolume() ?? 100
-        }
-
+        if savedVolume == nil { savedVolume = currentVolume() ?? 100 }
         startTarget()
         if settings.alwaysShuffle { ensureShuffleOn() }
         _ = Shell.run("\(sp) playback volume \(settings.spotifyVolume)")
     }
-
-    private func disengage() {
-        if let v = savedVolume { _ = Shell.run("\(sp) playback volume \(v)") }
-        _ = Shell.run("\(sp) playback pause")
-        savedVolume = nil
-    }
-
-    // MARK: Steps
 
     private func ensurePlayerRunning() {
         let running = !Shell.run("/usr/bin/pgrep -x spotify_player")
@@ -75,8 +86,9 @@ final class MusicController {
     private func startTarget() {
         let target = settings.activeSlotTarget
         if isLiked(target) {
-            // `start liked --random` is broken in 0.24.1; plain start + separate shuffle.
-            _ = Shell.run("\(sp) playback start liked")
+            // `--random` picks a RANDOM starting track (verified on 0.24.1) — no fixed
+            // first song. Shuffle is ensured separately for continued playback.
+            _ = Shell.run("\(sp) playback start liked --random")
         } else if let ctx = parseContext(target) {
             let shuffle = settings.alwaysShuffle ? " --shuffle" : ""
             _ = Shell.run("\(sp) playback start context --id \(ctx.id)\(shuffle) \(ctx.type)")
@@ -98,11 +110,11 @@ final class MusicController {
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
         return obj
     }
+    private func isPlaying() -> Bool { playbackJSON()?["is_playing"] as? Bool ?? false }
+    private func shuffleState() -> Bool? { playbackJSON()?["shuffle_state"] as? Bool }
     private func currentVolume() -> Int? {
         (playbackJSON()?["device"] as? [String: Any])?["volume_percent"] as? Int
     }
-    private func isPlaying() -> Bool { playbackJSON()?["is_playing"] as? Bool ?? false }
-    private func shuffleState() -> Bool? { playbackJSON()?["shuffle_state"] as? Bool }
 
     // MARK: Target parsing (spotify:TYPE:ID | open.spotify.com/…/TYPE/ID | liked | bare id)
 

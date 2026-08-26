@@ -15,9 +15,16 @@ struct FlowstateApp: App {
         let snd = SoundPlayer(settings: s)
         let mus = MusicController(settings: s)
         let e = TimerEngine(settings: s)
-        e.onCue = { [snd] cue in snd.play(cue) }
+        e.onCue = { [snd, mus] cue in
+            snd.play(cue)
+            switch cue {
+            case .shortBreak: mus.pauseForBreak()     // pause the soundtrack during breaks
+            case .backToWork: mus.resumeFromBreak()   // resume when focus returns
+            case .longBreak:  break                   // cycle ends → stopSoundtrack (onSessionEnd)
+            }
+        }
         e.onSessionStart = { [mus] in mus.startSoundtrack() }   // once, on begin
-        e.onSessionEnd = { [mus] in mus.stopSoundtrack() }      // once, on stop/finish
+        e.onSessionEnd = { [mus] in mus.stopSoundtrack() }      // once: pause + restore, leave open
 
         _settings = State(initialValue: s)
         _sounds = State(initialValue: snd)
