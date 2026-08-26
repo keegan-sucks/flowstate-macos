@@ -27,8 +27,8 @@ struct FlowstateApp: App {
     }
 
     private var menuBarLabel: Text {
-        let symbol = Text("\(Image(systemName: engine.menuBarSymbol))")
-        if engine.phase == .idle { return symbol }
-        return symbol + Text("  \(engine.dotsText)  \(engine.clockText)")
+        // Pure text — text glyphs render reliably in the menu bar; image labels don't.
+        if engine.phase == .idle { return Text(engine.menuBarSymbol) }
+        return Text("\(engine.menuBarSymbol)  \(engine.dotsText)  \(engine.clockText)")
     }
 }

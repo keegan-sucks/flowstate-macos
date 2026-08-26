@@ -27,9 +27,11 @@ final class TimerEngine {
     var shortBreakMinutes = 5
     var cycles = 4
 
-    /// Menu-bar glyphs (SF Symbols — monochrome in the menu bar). Configurable later.
-    var focusSymbol = "target"
-    var breakSymbol = "cup.and.saucer.fill"
+    /// Menu-bar glyphs. Plain monochrome TEXT glyphs — an SF Symbol rendered as an
+    /// *image* inside a MenuBarExtra text label does not draw (it shows up blank), so
+    /// we use text characters, which always render. Configurable later.
+    var focusSymbol = "⌖"      // crosshair / target
+    var breakSymbol = "☾"      // crescent — rest
 
     // MARK: - Live state
     private(set) var phase: Phase = .idle
