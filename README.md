@@ -65,34 +65,48 @@ open build/Build/Products/Debug/Flowstate.app
 # or: open Flowstate.xcodeproj  (then Cmd-R)
 ```
 
-## Settings (⚙)
+## Settings & shortcuts
 
-Durations & rounds · menu-bar glyphs · per-cue sounds (choice + volume + preview) ·
-soundtrack (play toggle, now-playing notifications, focus volume, always-shuffle, player
-workspace, and three editable slots). A slot **Target** is a Spotify URI/URL
-(`spotify:playlist:…`, album, or artist) or the keyword `liked`. Settings persist across
-launches.
+Open the ⚙ (or press **E**). Sections: **General** (launch at login) · **Timer**
+(durations, rounds) · **Menu-bar glyphs** · **Sounds** (per cue: choice + volume +
+preview) · **Soundtrack** (play toggle, focus volume, always-shuffle, player workspace,
+three editable slots). A slot **Target** is a Spotify URI/URL (`spotify:playlist:…`,
+album, or artist) or the keyword `liked`. Settings persist across launches.
+
+With the panel open: **Space** start/pause · **R** reset · **S** skip phase ·
+**N** skip song · **E** edit · **Esc** close edit.
 
 ## Notes
 
 - **Only hearing Liked songs?** Turn **off** Spotify → Settings → Playback → *Autoplay* —
   Liked Songs has no "context," so with Autoplay on, Spotify appends non-liked
   recommendations once the queued liked tracks run down.
-- The player runs in **Terminal.app**; at cycle end the music is paused but the window is
-  left open (Terminal keeps completed windows on this setup). Milestone 6 will add global
-  keyboard shortcuts and a final polish pass.
+- The player runs in **Terminal.app**; at cycle end the music is paused and the window is
+  left open (Terminal keeps its window on this setup).
 
 ## Layout
 
 ```
 Sources/
-  FlowstateApp.swift      # @main App: MenuBarExtra panel + Settings window
+  FlowstateApp.swift      # @main App + MenuBarExtra
   TimerEngine.swift       # the Pomodoro state machine (round tracking lives here)
   Settings.swift          # persisted config (@Observable + UserDefaults)
   Sound.swift             # phase-cue sounds (NSSound)
-  MusicController.swift    # spotify_player CLI + AeroSpace placement + now-playing
+  MusicController.swift    # spotify_player CLI + AeroSpace workspace placement
   Shell.swift             # small Process helper
+  LoginItem.swift         # launch-at-login (SMAppService)
   Views/
+    RootView.swift        # swaps panel / edit in the popover
     PanelView.swift       # the menu-bar panel
-    EditView.swift        # the Settings window
+    EditView.swift        # the ⚙ edit view
+scripts/
+  release.sh              # cut a release + bump the Homebrew cask
+```
+
+## Releasing
+
+Cut a new version and update the Homebrew cask in one step (uses your `gh` auth):
+
+```bash
+scripts/release.sh 1.1
 ```
