@@ -15,4 +15,6 @@ targets:
         GENERATE_INFOPLIST_FILE: true
         # Tells macOS this is a menu-bar accessory (no Dock icon):
         INFOPLIST_KEY_LSUIElement: true
+        # Shown in the one-time "Flowstate wants to control Terminal" Automation prompt:
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: "Flowstate uses Terminal to launch and place the spotify_player music player."
         ENABLE_APP_SANDBOX: false       # we shell out to spotify_player, aerospace, osascript

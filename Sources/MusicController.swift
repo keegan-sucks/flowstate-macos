@@ -99,8 +99,7 @@ final class MusicController {
     // MARK: Sequence (serial queue)
 
     private func engage(_ cfg: Config, _ gen: Int) {
-        ensurePlayerRunning(workspace: cfg.workspace, gen)
-        guard !isCancelled(gen), waitForDevice(gen) else { return }
+        guard ensurePlayer(workspace: cfg.workspace, gen) else { return }
         _ = Shell.run("\(sp) connect --name \(device)")
         if savedVolume == nil { savedVolume = currentVolume() ?? 100 }
         if isCancelled(gen) { return }
@@ -130,10 +129,10 @@ final class MusicController {
     /// mid-sequence cancel never strands the device at volume 0.
     private func startContext(_ ctx: (type: String, id: String), _ cfg: Config, _ gen: Int) {
         guard cfg.alwaysShuffle else {
+            _ = Shell.run("\(sp) playback volume \(cfg.volume)")   // duck before playing
             _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
             Thread.sleep(forTimeInterval: 0.9)
             if !isPlaying() { _ = Shell.run("\(sp) playback play") }
-            _ = Shell.run("\(sp) playback volume \(cfg.volume)")
             return
         }
         _ = Shell.run("\(sp) playback volume 0")
@@ -157,16 +156,48 @@ final class MusicController {
 
     // MARK: Launch + AeroSpace placement
 
-    private func ensurePlayerRunning(workspace: Int, _ gen: Int) {
-        let running = !Shell.run("/usr/bin/pgrep -x spotify_player")
+    /// Ensure the spotify_player Connect device is available. Reuse a running instance,
+    /// otherwise launch its terminal — retrying once if the process never comes up
+    /// (Terminal's first cold-start `do script`, or the one-time "control Terminal"
+    /// Automation prompt, can make the first attempt a no-op that opens an empty window).
+    private func ensurePlayer(workspace: Int, _ gen: Int) -> Bool {
+        for _ in 1...2 {
+            if isCancelled(gen) { return false }
+            // Reuse a running instance — including one from a slow prior launch — so the
+            // retry never spawns a duplicate.
+            if spotifyRunning() { return waitForDevice(gen, ticks: 60) }
+            let before = terminalWindowIDs()
+            _ = Shell.run(#"osascript -e 'tell application "Terminal" to do script "exec /opt/homebrew/bin/spotify_player"'"#)
+            for _ in 0..<16 {                          // ~5s for the process to appear
+                if isCancelled(gen) { return false }
+                if spotifyRunning() { break }
+                Thread.sleep(forTimeInterval: 0.3)
+            }
+            if spotifyRunning() {
+                placeNewPlayerWindow(notIn: before, workspace: workspace, gen)
+                return waitForDevice(gen, ticks: 40)
+            }
+            // No process → the launch no-op'd; loop retries (re-checks spotifyRunning first).
+        }
+        return false
+    }
+
+    private func spotifyRunning() -> Bool {
+        !Shell.run("/usr/bin/pgrep -x spotify_player")
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        guard !running else { return }
-        let before = terminalWindowIDs()
-        _ = Shell.run(#"osascript -e 'tell application "Terminal" to do script "exec /opt/homebrew/bin/spotify_player"'"#)
-        guard workspace > 0 else { return }           // 0 = leave the window in place
+    }
+
+    /// Move the newly-opened player Terminal window to the workspace (by window-id,
+    /// which doesn't steal focus). Picks the new window whose title mentions
+    /// spotify_player so an unrelated Terminal opened mid-launch is never yanked.
+    private func placeNewPlayerWindow(notIn before: Set<String>, workspace: Int, _ gen: Int) {
+        guard workspace > 0 else { return }            // 0 = leave the window in place
         for _ in 0..<20 {
             if isCancelled(gen) { return }
-            if let id = terminalWindowIDs().subtracting(before).first {
+            let fresh = terminalWindows().filter { !before.contains($0.id) }
+            let match = fresh.first { $0.title.contains("spotify_player") }
+            // Unambiguous fallback: exactly one new window (title not yet resolved).
+            if let id = match?.id ?? (fresh.count == 1 ? fresh.first?.id : nil) {
                 _ = Shell.run("\(aerospace) move-node-to-workspace --window-id \(id) -- \(workspace)")
                 return
             }
@@ -174,16 +205,24 @@ final class MusicController {
         }
     }
 
-    /// AeroSpace window-ids of every Terminal window (across monitors).
-    private func terminalWindowIDs() -> Set<String> {
-        let out = Shell.run("\(aerospace) list-windows --monitor all --app-bundle-id com.apple.Terminal --format '%{window-id}'")
-        return Set(out.split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty })
+    /// (window-id, title) of every Terminal window (across monitors).
+    private func terminalWindows() -> [(id: String, title: String)] {
+        let out = Shell.run("\(aerospace) list-windows --monitor all --app-bundle-id com.apple.Terminal --format '%{window-id}|%{window-title}'")
+        return out.split(whereSeparator: \.isNewline).compactMap { line in
+            let parts = line.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            guard parts.count == 2 else { return nil }
+            let id = parts[0].trimmingCharacters(in: .whitespaces)
+            return id.isEmpty ? nil : (id, parts[1])
+        }
     }
 
-    private func waitForDevice(_ gen: Int) -> Bool {
-        for _ in 0..<60 {
+    /// AeroSpace window-ids of every Terminal window (across monitors).
+    private func terminalWindowIDs() -> Set<String> {
+        Set(terminalWindows().map { $0.id })
+    }
+
+    private func waitForDevice(_ gen: Int, ticks: Int) -> Bool {
+        for _ in 0..<ticks {
             if isCancelled(gen) { return false }
             if Shell.run("\(sp) get key devices").contains("\"name\":\"\(device)\"") { return true }
             Thread.sleep(forTimeInterval: 0.5)
