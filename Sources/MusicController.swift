@@ -58,8 +58,17 @@ final class MusicController {
 
     func resumeFromBreak() {
         guard settings.playSoundtrack else { return }
+        let cfg = snapshot()
+        let gen = bumpGeneration()
         queue.async { [weak self] in guard let self else { return }
             _ = Shell.run("\(self.sp) playback play")
+            Thread.sleep(forTimeInterval: 0.8)
+            if self.isCancelled(gen) { return }
+            // Spotify deactivates the librespot device during a break, so a bare `play`
+            // often has no track to resume — reconnect and restart the soundtrack.
+            if self.playbackTrack() == nil {
+                self.engage(cfg, gen)
+            }
         }
     }
 
@@ -240,6 +249,9 @@ final class MusicController {
     }
     private func isPlaying() -> Bool { playbackJSON()?["is_playing"] as? Bool ?? false }
     private func shuffleState() -> Bool? { playbackJSON()?["shuffle_state"] as? Bool }
+    private func playbackTrack() -> String? {
+        (playbackJSON()?["item"] as? [String: Any])?["name"] as? String
+    }
     private func currentVolume() -> Int? {
         (playbackJSON()?["device"] as? [String: Any])?["volume_percent"] as? Int
     }
