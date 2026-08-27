@@ -44,6 +44,9 @@ Then authenticate the soundtrack once: `spotify_player authenticate` (needs Spot
 Premium). Optionally install [AeroSpace](https://github.com/nikitabobko/AeroSpace) for
 workspace placement.
 
+Update later with `brew update && brew upgrade --cask flowstate` (`brew update` refreshes
+the tap first).
+
 ## Requirements (to build from source)
 
 - macOS 14+

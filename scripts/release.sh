@@ -67,6 +67,6 @@ rm -rf "$TAP_DIR"
 
 echo
 echo "==> Released v$VERSION."
-echo "    brew upgrade --cask flowstate"
+echo "    brew update && brew upgrade --cask flowstate"
 echo "    (ad-hoc signed — first launch may need:"
 echo "     xattr -dr com.apple.quarantine /Applications/Flowstate.app )"
