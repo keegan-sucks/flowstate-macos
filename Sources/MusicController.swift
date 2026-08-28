@@ -125,6 +125,7 @@ final class MusicController {
         } else if let ctx = parseContext(cfg.target) {
             startContext(ctx, cfg, gen)
         }
+        if !isCancelled(gen) { ensureRepeatContext() }   // repeat the whole playlist / liked
     }
 
     /// Liked Songs: `--random` starts on a random track directly. Volume is ducked
@@ -170,6 +171,16 @@ final class MusicController {
         if shuffleState() == false { _ = Shell.run("\(sp) playback shuffle") }
     }
 
+    /// Ensure repeat is "context" (repeat the whole playlist / liked collection). `repeat`
+    /// cycles off → context → track, so read-then-cycle up to a full loop.
+    private func ensureRepeatContext() {
+        for _ in 0..<3 {
+            if repeatState() == "context" { return }
+            _ = Shell.run("\(sp) playback repeat")
+            Thread.sleep(forTimeInterval: 0.5)
+        }
+    }
+
     // MARK: Launch + AeroSpace placement
 
     /// Ensure the spotify_player Connect device is available. Reuse a running instance,
@@ -183,7 +194,7 @@ final class MusicController {
             // retry never spawns a duplicate.
             if spotifyRunning() { return waitForDevice(gen, ticks: 60) }
             let before = terminalWindowIDs()
-            _ = Shell.run(#"osascript -e 'tell application "Terminal" to do script "exec /opt/homebrew/bin/spotify_player"'"#)
+            launchPlayerTerminal()
             for _ in 0..<16 {                          // ~5s for the process to appear
                 if isCancelled(gen) { return false }
                 if spotifyRunning() { break }
@@ -201,6 +212,13 @@ final class MusicController {
     private func spotifyRunning() -> Bool {
         !Shell.run("/usr/bin/pgrep -x spotify_player")
             .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Open spotify_player in Terminal, matching how the user launches it by hand:
+    /// on a cold start reuse Terminal's own startup window (so there's no extra empty
+    /// window), and force the window to the user's startup profile (their theme).
+    private func launchPlayerTerminal() {
+        _ = Shell.run(#"osascript -e 'set wasRunning to (application "Terminal" is running)' -e 'tell application "Terminal"' -e 'if wasRunning then' -e 'do script "exec /opt/homebrew/bin/spotify_player"' -e 'else' -e 'do script "exec /opt/homebrew/bin/spotify_player" in window 1' -e 'end if' -e 'delay 0.2' -e 'set current settings of front window to startup settings' -e 'end tell'"#)
     }
 
     /// Move the newly-opened player Terminal window to the workspace (by window-id,
@@ -256,6 +274,7 @@ final class MusicController {
     }
     private func isPlaying() -> Bool { playbackJSON()?["is_playing"] as? Bool ?? false }
     private func shuffleState() -> Bool? { playbackJSON()?["shuffle_state"] as? Bool }
+    private func repeatState() -> String? { playbackJSON()?["repeat_state"] as? String }
     private func playbackTrack() -> String? {
         (playbackJSON()?["item"] as? [String: Any])?["name"] as? String
     }
