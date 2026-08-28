@@ -191,13 +191,24 @@ final class MusicController {
         }
     }
 
-    /// Ensure repeat is "context" (repeat the whole playlist / liked collection). `repeat`
-    /// cycles off → context → track, so read-then-cycle up to a full loop.
+    /// Ensure repeat is "context" (repeat the whole playlist / liked collection).
+    /// `playback repeat` only cycles (off → track → context → off) and the state read
+    /// LAGS the command, so re-reading between cycles overshoots and flips off↔context.
+    /// Each round: settle, read once, then issue exactly the cycles needed (no re-read
+    /// between them). Re-verify across rounds to correct a dropped cycle.
     private func ensureRepeatContext() {
         for _ in 0..<3 {
-            if repeatState() == "context" { return }
-            _ = Shell.run("\(sp) playback repeat")
-            Thread.sleep(forTimeInterval: 0.5)
+            Thread.sleep(forTimeInterval: 0.6)          // settle so the read is accurate
+            switch repeatState() {
+            case "context":
+                return
+            case "track":
+                _ = Shell.run("\(sp) playback repeat")   // track → context
+            default:                                     // off / unknown
+                _ = Shell.run("\(sp) playback repeat")   // off → track
+                Thread.sleep(forTimeInterval: 0.6)
+                _ = Shell.run("\(sp) playback repeat")   // track → context
+            }
         }
     }
 
