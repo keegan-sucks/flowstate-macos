@@ -258,11 +258,16 @@ final class MusicController {
             // Unambiguous fallback: exactly one new window (title not yet resolved).
             if let id = match?.id ?? (fresh.count == 1 ? fresh.first?.id : nil) {
                 _ = Shell.run("\(aerospace) move-node-to-workspace --window-id \(id) -- \(workspace)")
-                // Retry tiling: right after the move the window is still settling, so a
-                // single `layout tiling` no-ops and it stays floating.
-                for _ in 0..<3 {
-                    Thread.sleep(forTimeInterval: 0.5)
-                    _ = Shell.run("\(aerospace) layout --window-id \(id) tiling")
+                // A window moved to a non-focused workspace floats, and stays settling for
+                // several seconds — a `layout tiling` that runs too early just no-ops. Retry
+                // in the BACKGROUND (so the music start isn't blocked) until it sticks; once
+                // tiled it stays, and repeat `layout tiling` calls are idempotent no-ops.
+                let aero = aerospace
+                DispatchQueue.global(qos: .utility).async {
+                    for _ in 0..<16 {
+                        _ = Shell.run("\(aero) layout --window-id \(id) tiling")
+                        Thread.sleep(forTimeInterval: 0.6)
+                    }
                 }
                 return
             }
