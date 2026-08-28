@@ -23,6 +23,26 @@ final class MusicController {
     private let genLock = NSLock()
     private var generation = 0               // guarded by genLock
 
+    // Playback watchdog
+    private let watchdogQueue = DispatchQueue(label: "com.keegan.flowstate.music.watchdog")
+    private var watchdogTimer: DispatchSourceTimer?   // main-thread only
+    private let wdLock = NSLock()
+    private var _shouldBePlaying = false               // guarded by wdLock
+    private var _lastConfig: Config?                   // guarded by wdLock
+    private var shouldBePlaying: Bool {
+        get { wdLock.lock(); defer { wdLock.unlock() }; return _shouldBePlaying }
+        set { wdLock.lock(); _shouldBePlaying = newValue; wdLock.unlock() }
+    }
+    private var lastConfig: Config? {
+        get { wdLock.lock(); defer { wdLock.unlock() }; return _lastConfig }
+        set { wdLock.lock(); _lastConfig = newValue; wdLock.unlock() }
+    }
+    private var _engaging = false                       // guarded by wdLock
+    private var engaging: Bool {                         // true while an engage() is running
+        get { wdLock.lock(); defer { wdLock.unlock() }; return _engaging }
+        set { wdLock.lock(); _engaging = newValue; wdLock.unlock() }
+    }
+
     /// Immutable snapshot of the Settings the background work needs.
     private struct Config {
         let alwaysShuffle: Bool
@@ -38,6 +58,8 @@ final class MusicController {
     func startSoundtrack() {
         guard settings.playSoundtrack else { return }
         let cfg = snapshot(); let gen = bumpGeneration()
+        lastConfig = cfg; shouldBePlaying = true
+        startWatchdog()
         queue.async { [weak self] in self?.engage(cfg, gen) }
     }
 
@@ -45,11 +67,13 @@ final class MusicController {
     func switchSoundtrack() {
         guard settings.playSoundtrack else { return }
         let cfg = snapshot(); let gen = bumpGeneration()
+        lastConfig = cfg; shouldBePlaying = true
         queue.async { [weak self] in self?.engage(cfg, gen) }
     }
 
     func pauseForBreak() {
         guard settings.playSoundtrack else { return }
+        shouldBePlaying = false              // paused on purpose — don't let the watchdog recover
         _ = bumpGeneration()                 // cancel any in-flight engage()
         queue.async { [weak self] in guard let self else { return }
             _ = Shell.run("\(self.sp) playback pause")
@@ -60,6 +84,7 @@ final class MusicController {
         guard settings.playSoundtrack else { return }
         let cfg = snapshot()
         let gen = bumpGeneration()
+        lastConfig = cfg; shouldBePlaying = true
         queue.async { [weak self] in guard let self else { return }
             _ = Shell.run("\(self.sp) playback play")
             Thread.sleep(forTimeInterval: 0.8)
@@ -87,8 +112,50 @@ final class MusicController {
         }
     }
 
+    // MARK: Playback watchdog
+
+    private func startWatchdog() {
+        stopWatchdog()
+        let t = DispatchSource.makeTimerSource(queue: watchdogQueue)
+        t.schedule(deadline: .now() + 15, repeating: 8)   // first check after startup settles
+        t.setEventHandler { [weak self] in self?.watchdogTick() }
+        watchdogTimer = t
+        t.resume()
+    }
+
+    private func stopWatchdog() {
+        watchdogTimer?.cancel()
+        watchdogTimer = nil
+    }
+
+    /// If a focus block should be playing but the librespot device has dropped
+    /// ("no playback found"), silently reconnect and restart the soundtrack.
+    private func watchdogTick() {
+        // Skip while a start is legitimately in progress (engaging) — its own startup can
+        // run 20-30s (cold Terminal launch + device wait) with isPlaying() false.
+        guard shouldBePlaying, !engaging, !isPlaying() else { return }
+        Thread.sleep(forTimeInterval: 0.8)                 // confirm — ignore a transient blip
+        guard shouldBePlaying, !engaging, !isPlaying(), let cfg = lastConfig else { return }
+        // Capture (don't bump) the generation: a later start/switch/pause/stop bumps it and
+        // cancels this recovery, and recover() re-checks shouldBePlaying before touching audio.
+        let gen = currentGeneration()
+        queue.async { [weak self] in self?.recover(cfg, gen) }
+    }
+
+    private func recover(_ cfg: Config, _ gen: Int) {
+        guard shouldBePlaying, !isCancelled(gen) else { return }   // superseded by stop/break/switch
+        _ = Shell.run("\(sp) playback play")               // gentle resume first
+        Thread.sleep(forTimeInterval: 0.8)
+        guard shouldBePlaying, !isCancelled(gen) else { return }
+        if playbackTrack() == nil {                        // device really gone → full restart
+            engage(cfg, gen)
+        }
+    }
+
     /// End of cycle / reset — pause + restore the pre-session volume; leave the player open.
     func stopSoundtrack() {
+        shouldBePlaying = false
+        stopWatchdog()
         _ = bumpGeneration()                 // cancel any in-flight engage()
         queue.async { [weak self] in guard let self else { return }
             if let v = self.savedVolume { _ = Shell.run("\(self.sp) playback volume \(v)") }
@@ -111,10 +178,15 @@ final class MusicController {
     private func isCancelled(_ g: Int) -> Bool {
         genLock.lock(); let c = generation != g; genLock.unlock(); return c
     }
+    private func currentGeneration() -> Int {
+        genLock.lock(); defer { genLock.unlock() }; return generation
+    }
 
     // MARK: Sequence (serial queue)
 
     private func engage(_ cfg: Config, _ gen: Int) {
+        engaging = true                                  // watchdog must not fight a live start
+        defer { engaging = false }
         guard ensurePlayer(workspace: cfg.workspace, gen) else { return }
         _ = Shell.run("\(sp) connect --name \(device)")
         Thread.sleep(forTimeInterval: 0.6)   // let the device activate before playback commands
