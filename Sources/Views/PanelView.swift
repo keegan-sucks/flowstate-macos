@@ -8,6 +8,8 @@ struct PanelView: View {
     let music: MusicController
     var edit: () -> Void
 
+    @State private var justLiked = false
+
     var body: some View {
         VStack(spacing: 14) {
             HStack {
@@ -84,6 +86,18 @@ struct PanelView: View {
                 .buttonStyle(.bordered)
                 .tint(settings.activeSlot == i ? .accentColor : .secondary)
             }
+
+            Button {
+                music.likeCurrentSong()
+                justLiked = true
+                Task { try? await Task.sleep(for: .seconds(1.2)); justLiked = false }
+            } label: {
+                Image(systemName: justLiked ? "heart.fill" : "heart")
+                    .foregroundStyle(justLiked ? .pink : .primary)
+            }
+            .buttonStyle(.bordered)
+            .keyboardShortcut("l", modifiers: [])
+            .help("Like current song (L)")
 
             Button(action: music.nextTrack) {
                 Image(systemName: "forward.end.fill")

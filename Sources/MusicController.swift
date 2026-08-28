@@ -80,6 +80,13 @@ final class MusicController {
         }
     }
 
+    /// Like (save) the currently playing track.
+    func likeCurrentSong() {
+        queue.async { [weak self] in guard let self else { return }
+            _ = Shell.run("\(self.sp) like")
+        }
+    }
+
     /// End of cycle / reset — pause + restore the pre-session volume; leave the player open.
     func stopSoundtrack() {
         _ = bumpGeneration()                 // cancel any in-flight engage()
