@@ -183,7 +183,12 @@ final class MusicController {
     }
 
     private func ensureShuffleOn() {
-        if shuffleState() == false { _ = Shell.run("\(sp) playback shuffle") }
+        // Read-toggle-verify (a single toggle right after a context change often no-ops).
+        for _ in 0..<3 {
+            if shuffleState() == true { return }
+            _ = Shell.run("\(sp) playback shuffle")
+            Thread.sleep(forTimeInterval: 0.5)
+        }
     }
 
     /// Ensure repeat is "context" (repeat the whole playlist / liked collection). `repeat`
