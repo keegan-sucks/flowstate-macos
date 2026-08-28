@@ -117,6 +117,7 @@ final class MusicController {
     private func engage(_ cfg: Config, _ gen: Int) {
         guard ensurePlayer(workspace: cfg.workspace, gen) else { return }
         _ = Shell.run("\(sp) connect --name \(device)")
+        Thread.sleep(forTimeInterval: 0.6)   // let the device activate before playback commands
         if savedVolume == nil { savedVolume = currentVolume() ?? 100 }
         if isCancelled(gen) { return }
 
@@ -133,8 +134,14 @@ final class MusicController {
     private func startLiked(_ cfg: Config, _ gen: Int) {
         _ = Shell.run("\(sp) playback volume \(cfg.volume)")
         _ = Shell.run("\(sp) playback start liked --random")
-        Thread.sleep(forTimeInterval: 0.9)
+        Thread.sleep(forTimeInterval: 1.0)
         if isCancelled(gen) { return }
+        // Verify it took: Liked playback has no context, so a lingering context.uri means
+        // the previous playlist is still playing (device wasn't ready) — retry once.
+        if contextURI() != nil {
+            _ = Shell.run("\(sp) playback start liked --random")
+            Thread.sleep(forTimeInterval: 1.0)
+        }
         if !isPlaying() { _ = Shell.run("\(sp) playback play") }
         if cfg.alwaysShuffle { ensureShuffleOn() }
     }
@@ -147,15 +154,13 @@ final class MusicController {
     private func startContext(_ ctx: (type: String, id: String), _ cfg: Config, _ gen: Int) {
         guard cfg.alwaysShuffle else {
             _ = Shell.run("\(sp) playback volume \(cfg.volume)")   // duck before playing
-            _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
-            Thread.sleep(forTimeInterval: 0.9)
+            startContextVerified(ctx)
             if !isPlaying() { _ = Shell.run("\(sp) playback play") }
             return
         }
         _ = Shell.run("\(sp) playback volume 0")
         Thread.sleep(forTimeInterval: 0.4)
-        _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
-        Thread.sleep(forTimeInterval: 1.2)
+        startContextVerified(ctx)
         ensureShuffleOn()
         Thread.sleep(forTimeInterval: 0.6)
         for _ in 0..<Int.random(in: 2...5) {
@@ -165,6 +170,16 @@ final class MusicController {
         }
         if !isPlaying() { _ = Shell.run("\(sp) playback play") }
         _ = Shell.run("\(sp) playback volume \(cfg.volume)")   // always unmute
+    }
+
+    /// Start a context, verifying it took — retry once if the previous context lingers.
+    private func startContextVerified(_ ctx: (type: String, id: String)) {
+        _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
+        Thread.sleep(forTimeInterval: 1.0)
+        if !(contextURI()?.contains(ctx.id) ?? false) {
+            _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
+            Thread.sleep(forTimeInterval: 1.0)
+        }
     }
 
     private func ensureShuffleOn() {
@@ -233,6 +248,7 @@ final class MusicController {
             // Unambiguous fallback: exactly one new window (title not yet resolved).
             if let id = match?.id ?? (fresh.count == 1 ? fresh.first?.id : nil) {
                 _ = Shell.run("\(aerospace) move-node-to-workspace --window-id \(id) -- \(workspace)")
+                _ = Shell.run("\(aerospace) layout --window-id \(id) tiling")   // tile it, don't float
                 return
             }
             Thread.sleep(forTimeInterval: 0.3)
@@ -275,6 +291,7 @@ final class MusicController {
     private func isPlaying() -> Bool { playbackJSON()?["is_playing"] as? Bool ?? false }
     private func shuffleState() -> Bool? { playbackJSON()?["shuffle_state"] as? Bool }
     private func repeatState() -> String? { playbackJSON()?["repeat_state"] as? String }
+    private func contextURI() -> String? { (playbackJSON()?["context"] as? [String: Any])?["uri"] as? String }
     private func playbackTrack() -> String? {
         (playbackJSON()?["item"] as? [String: Any])?["name"] as? String
     }

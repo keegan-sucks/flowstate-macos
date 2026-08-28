@@ -73,8 +73,9 @@ final class Settings {
         activeSlot        = i("activeSlot", 2)                    // 0-based → Liked
         slot1Label        = s("slot1Label", "Lofi")
         slot1Target       = s("slot1Target", "spotify:playlist:37i9dQZF1DWWQRwui0ExPn")
-        slot2Label        = s("slot2Label", "Nature")
-        slot2Target       = s("slot2Target", "spotify:playlist:37i9dQZF1DX4PP3DA4J0N8")
+        slot2Label        = s("slot2Label", "Discover Weekly")
+        // Discover Weekly is a per-user playlist — this is the owner's; others set their own.
+        slot2Target       = s("slot2Target", "spotify:playlist:37i9dQZEVXcRAcxrqHLe1Q")
         slot3Label        = s("slot3Label", "Liked")
         slot3Target       = s("slot3Target", "liked")
         spotifyWorkspace  = i("spotifyWorkspace", 9)             // 0 = leave in place
