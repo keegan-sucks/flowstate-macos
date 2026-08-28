@@ -192,23 +192,17 @@ final class MusicController {
     }
 
     /// Ensure repeat is "context" (repeat the whole playlist / liked collection).
-    /// `playback repeat` only cycles (off → track → context → off) and the state read
-    /// LAGS the command, so re-reading between cycles overshoots and flips off↔context.
-    /// Each round: settle, read once, then issue exactly the cycles needed (no re-read
-    /// between them). Re-verify across rounds to correct a dropped cycle.
+    /// Starting playback (liked/context) reliably resets repeat to "off", and the
+    /// repeat_state read lags too much to trust right after a start — so just cycle
+    /// off → track → context (2 steps) blindly. A single settled verify then fixes a
+    /// rare dropped cycle; a stale "off" read is ignored to avoid overshooting.
     private func ensureRepeatContext() {
-        for _ in 0..<3 {
-            Thread.sleep(forTimeInterval: 0.6)          // settle so the read is accurate
-            switch repeatState() {
-            case "context":
-                return
-            case "track":
-                _ = Shell.run("\(sp) playback repeat")   // track → context
-            default:                                     // off / unknown
-                _ = Shell.run("\(sp) playback repeat")   // off → track
-                Thread.sleep(forTimeInterval: 0.6)
-                _ = Shell.run("\(sp) playback repeat")   // track → context
-            }
+        _ = Shell.run("\(sp) playback repeat")           // off → track
+        Thread.sleep(forTimeInterval: 0.7)
+        _ = Shell.run("\(sp) playback repeat")           // track → context
+        Thread.sleep(forTimeInterval: 1.2)               // settle for an accurate read
+        if repeatState() == "track" {                    // a cycle was dropped
+            _ = Shell.run("\(sp) playback repeat")
         }
     }
 
@@ -264,7 +258,12 @@ final class MusicController {
             // Unambiguous fallback: exactly one new window (title not yet resolved).
             if let id = match?.id ?? (fresh.count == 1 ? fresh.first?.id : nil) {
                 _ = Shell.run("\(aerospace) move-node-to-workspace --window-id \(id) -- \(workspace)")
-                _ = Shell.run("\(aerospace) layout --window-id \(id) tiling")   // tile it, don't float
+                // Retry tiling: right after the move the window is still settling, so a
+                // single `layout tiling` no-ops and it stays floating.
+                for _ in 0..<3 {
+                    Thread.sleep(forTimeInterval: 0.5)
+                    _ = Shell.run("\(aerospace) layout --window-id \(id) tiling")
+                }
                 return
             }
             Thread.sleep(forTimeInterval: 0.3)
