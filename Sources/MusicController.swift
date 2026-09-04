@@ -117,12 +117,19 @@ final class MusicController {
 
         setVolume(0)
         if isCancelled(gen) { return }
+
+        // `play track` is the ONE Spotify command that pulls the app to the foreground
+        // (volume / shuffle / next / play / pause don't). Capture whoever's in front,
+        // start the context, then hand focus straight back so Spotify never steals the
+        // user's place.
+        let prevFront = frontmostBundleID()
         osa("play track \"\(uri)\"")                       // starts the context at track 1
         Thread.sleep(forTimeInterval: 0.35)
         if playerState() == "stopped" {                    // app still warming up → retry once
             osa("play track \"\(uri)\"")
             Thread.sleep(forTimeInterval: 0.5)
         }
+        restoreFocus(prevFront)
         if isCancelled(gen) { return }
 
         if cfg.alwaysShuffle {
@@ -178,6 +185,32 @@ final class MusicController {
     private func playerState() -> String { osa("player state") }          // playing / paused / stopped
     private func currentVolume() -> Int? { Int(osa("sound volume")) }
     private func setVolume(_ v: Int) { osa("set sound volume to \(max(0, min(100, v)))") }
+
+    // MARK: Focus preservation (keep `play track` from stealing the foreground)
+
+    /// Bundle id of the frontmost app, via `lsappinfo` — no AppleScript, so no extra
+    /// automation-permission prompt. nil if it can't be determined.
+    private func frontmostBundleID() -> String? {
+        let asn = Shell.run("/usr/bin/lsappinfo front")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !asn.isEmpty else { return nil }
+        // e.g.  "CFBundleIdentifier"="com.apple.dt.Xcode"
+        let out = Shell.run("/usr/bin/lsappinfo info -only bundleid \(asn)")
+        guard let open = out.range(of: "=\"") else { return nil }
+        let tail = out[open.upperBound...]
+        guard let close = tail.firstIndex(of: "\"") else { return nil }
+        let id = String(tail[..<close])
+        return id.isEmpty ? nil : id
+    }
+
+    /// Return the foreground to `bundleID` (where it was before `play track`). Skips
+    /// Spotify itself, and validates the id so it can't inject into the shell.
+    private func restoreFocus(_ bundleID: String?) {
+        guard let id = bundleID, id != "com.spotify.client",
+              id.allSatisfy({ $0.isLetter || $0.isNumber || ".-".contains($0) })
+        else { return }
+        _ = Shell.run("/usr/bin/open -b \(id)")
+    }
 
     // MARK: Target parsing → a playable spotify: URI
 
