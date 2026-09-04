@@ -49,35 +49,32 @@ the tap first).
 
 ## Liked Songs (optional)
 
-The Spotify app can't shuffle **Liked Songs** on its own, so mirror them into an ordinary
-playlist and point a slot at that. Two ways:
+Everything above needs zero setup. Liked Songs is the one extra: the Spotify app can't
+shuffle *Liked Songs* directly, so you mirror them into a normal playlist. Two ways —
 
-- **By hand (no setup):** in Spotify, open *Liked Songs* → `Cmd-A` to select all →
-  right-click → *Add to playlist* → *New playlist*. Copy that playlist's link into a slot.
-- **Auto-syncing (keeps up as you like/unlike):** run the included script. It reads your
-  saved tracks and mirrors them into a "Liked (Flowstate)" playlist, then prints the URI
-  to paste into a slot:
+- **By hand — no developer account:** in Spotify, open *Liked Songs* → `Cmd-A` →
+  right-click → *Add to playlist* → *New playlist*, then paste that playlist's link into a
+  slot (Settings ⚙ → Soundtrack). Done.
 
-  ```bash
-  pip3 install spotipy
-  # one-time: create a free app at https://developer.spotify.com/dashboard,
-  # add redirect URI http://127.0.0.1:8888/callback, then:
-  export SPOTIPY_CLIENT_ID='...'; export SPOTIPY_CLIENT_SECRET='...'
-  export SPOTIPY_REDIRECT_URI='http://127.0.0.1:8888/callback'
-  python3 scripts/sync_liked_playlist.py
-  ```
-
-  To keep the mirror fresh automatically, install the **weekly** re-sync LaunchAgent
-  (put your `SPOTIPY_*` vars in `~/.config/flowstate/sync.env` so the unattended run can
-  read them — see `scripts/sync.env.example`):
+- **Auto-syncing — keeps up as you like/unlike:** run the guided setup and follow the
+  prompts:
 
   ```bash
-  scripts/install_sync_schedule.sh
+  scripts/setup_liked.sh
   ```
 
-  It copies the sync into `~/.config/flowstate` and schedules it for Sundays at 04:00.
-  (The runtime lives there, not in the repo, because macOS privacy blocks background
-  LaunchAgents from reading `~/Documents`, `~/Desktop`, and `~/Downloads`.)
+  It creates a "Liked (Flowstate)" playlist, prints the URI to paste into a slot, and
+  installs a **weekly** refresh. Run it again anytime to set up or reconfigure — there's
+  nothing to undo if you skipped it at first.
+
+  This one path needs a **free Spotify app** of your own: Spotify no longer lets a single
+  app serve many users, so each person registers their own at
+  [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard). You supply
+  only a **Client ID — there is no secret** (it uses the PKCE flow, so nothing sensitive is
+  ever stored). Under the hood: `scripts/sync_liked_playlist.py` does the sync,
+  `scripts/install_sync_schedule.sh` installs the weekly LaunchAgent into `~/.config/flowstate`
+  (out of `~/Documents`, which macOS blocks background jobs from reading), and your Client
+  ID lives in `~/.config/flowstate/sync.env` (`scripts/sync.env.example`).
 
 ## Requirements (to build from source)
 

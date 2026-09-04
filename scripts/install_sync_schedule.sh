@@ -28,9 +28,12 @@ cp "$REPO/scripts/run_sync.sh"            "$DEST/run_sync.sh"
 cp "$REPO/scripts/sync_liked_playlist.py" "$DEST/sync_liked_playlist.py"
 chmod +x "$DEST/run_sync.sh"
 # Reuse an existing OAuth token cache so the scheduled run never needs a browser.
-if [[ -f "$REPO/.cache-flowstate-liked-sync" && ! -f "$DEST/.cache-flowstate-liked-sync" ]]; then
-    cp "$REPO/.cache-flowstate-liked-sync" "$DEST/.cache-flowstate-liked-sync"
-fi
+# (The cache sits beside sync_liked_playlist.py; older layouts kept it at the repo root.)
+for src in "$REPO/scripts/.cache-flowstate-liked-sync" "$REPO/.cache-flowstate-liked-sync"; do
+    if [[ -f "$src" && ! -f "$DEST/.cache-flowstate-liked-sync" ]]; then
+        cp "$src" "$DEST/.cache-flowstate-liked-sync"
+    fi
+done
 
 cat > "$PLIST" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>

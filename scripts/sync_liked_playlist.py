@@ -2,37 +2,37 @@
 """Mirror your Spotify **Liked Songs** into an ordinary playlist.
 
 Liked Songs isn't a "context" the desktop app can shuffle on its own — which is
-the only reason Flowstate ever needed spotify_player. This copies every saved
-track into a normal playlist ("Liked (Flowstate)" by default) that the official
-Spotify app shuffles like any other. Re-run it whenever you want to refresh the
-snapshot (it *replaces* the playlist's contents, so it stays a faithful mirror).
+the only reason Flowstate needs a mirror. This copies every saved track into a
+normal playlist ("Liked (Flowstate)" by default) that the official Spotify app
+shuffles like any other. Re-run it to refresh the snapshot (it *replaces* the
+playlist's contents, so it stays a faithful mirror).
 
-Prints the playlist URI at the end — paste that into Flowstate's Liked slot.
+Prints the playlist URI at the end — paste that into a Flowstate slot.
+
+Auth: Spotify's PKCE flow — you need a **client_id** but **no client secret**
+(a client_id is public and safe). The token is cached next to this script.
 
 ────────────────────────────────────────────────────────────────────────────
-ONE-TIME SETUP (≈2 min)
+ONE-TIME SETUP (≈2 min)  —  or just run  scripts/setup_liked.sh  which does this
 ────────────────────────────────────────────────────────────────────────────
-1. Create a personal Spotify app (this is the only step I can't do for you —
-   it mints your own credentials):
+1. Create a free Spotify app (the only step that must be yours — it mints your
+   own client_id; Spotify no longer lets one shared app serve many users):
      • Go to  https://developer.spotify.com/dashboard  → "Create app".
-     • Name/description: anything (e.g. "Flowstate sync").
      • Redirect URI: add exactly   http://127.0.0.1:8888/callback
-     • Save, then open the app's Settings to copy its Client ID and Client Secret.
+     • APIs used: check "Web API". Save, then copy the Client ID from Settings.
+       (You do NOT need the client secret — PKCE doesn't use one.)
 
 2. Install the client library:
-     pip3 install spotipy      # or: pipx install spotipy
+     pip3 install spotipy
 
-3. Export your credentials (put these in ~/.zshrc to keep them, or paste per-run):
+3. Export your client id (put it in ~/.zshrc, or ~/.config/flowstate/sync.env):
      export SPOTIPY_CLIENT_ID='...'
-     export SPOTIPY_CLIENT_SECRET='...'
-     export SPOTIPY_REDIRECT_URI='http://127.0.0.1:8888/callback'
+     export SPOTIPY_REDIRECT_URI='http://127.0.0.1:8888/callback'   # optional; this is the default
 
 4. Run it:
      python3 scripts/sync_liked_playlist.py
-
    The first run opens your browser once to authorize; the token is cached to
-   .cache-flowstate-liked-sync next to wherever you run it, so later runs are
-   silent. Nothing here ever stores your Spotify password — only an OAuth token.
+   .cache-flowstate-liked-sync beside this script, so later runs are silent.
 """
 
 import os
@@ -40,7 +40,7 @@ import sys
 
 try:
     import spotipy
-    from spotipy.oauth2 import SpotifyOAuth
+    from spotipy.oauth2 import SpotifyPKCE
 except ImportError:
     sys.exit("Missing dependency. Install it first:  pip3 install spotipy")
 
@@ -51,15 +51,22 @@ PLAYLIST_DESC = "Auto-synced mirror of Liked Songs (managed by Flowstate)."
 # Scopes: read the library, read+write private playlists.
 SCOPE = "user-library-read playlist-read-private playlist-modify-private playlist-modify-public"
 
+# Cache the OAuth token beside this script, so it's found regardless of cwd
+# (matters for the scheduled run, which lives in ~/.config/flowstate).
+CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache-flowstate-liked-sync")
+
+DEFAULT_REDIRECT = "http://127.0.0.1:8888/callback"
+
 
 def spotify_client() -> "spotipy.Spotify":
-    missing = [v for v in ("SPOTIPY_CLIENT_ID", "SPOTIPY_CLIENT_SECRET", "SPOTIPY_REDIRECT_URI")
-               if not os.environ.get(v)]
-    if missing:
-        sys.exit("Missing env var(s): " + ", ".join(missing) +
-                 "\nSee the setup notes at the top of this file.")
-    auth = SpotifyOAuth(scope=SCOPE, cache_path=".cache-flowstate-liked-sync",
-                        open_browser=True)
+    client_id = os.environ.get("SPOTIPY_CLIENT_ID")
+    if not client_id:
+        sys.exit("Missing SPOTIPY_CLIENT_ID.\nSee the setup notes at the top of this file, "
+                 "or run scripts/setup_liked.sh.")
+    redirect = os.environ.get("SPOTIPY_REDIRECT_URI", DEFAULT_REDIRECT)
+    # PKCE: client_id + code_verifier, no client secret — for initial auth AND refresh.
+    auth = SpotifyPKCE(client_id=client_id, redirect_uri=redirect, scope=SCOPE,
+                       cache_path=CACHE, open_browser=True)
     return spotipy.Spotify(auth_manager=auth)
 
 

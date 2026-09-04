@@ -5,8 +5,9 @@
 # macOS privacy (TCC) blocks background LaunchAgents from reading.
 #
 # Credentials: loaded from sync.env next to this script (or ~/.config/flowstate/
-# sync.env, or $FLOWSTATE_ENV). See sync.env.example. It runs from its own dir so the
-# OAuth token cache (.cache-flowstate-liked-sync) is found and reused.
+# sync.env, or $FLOWSTATE_ENV) — just SPOTIPY_CLIENT_ID (PKCE; no secret). See
+# sync.env.example. The token cache (.cache-flowstate-liked-sync) sits beside
+# sync_liked_playlist.py, so it's found and reused regardless of cwd.
 set -e
 
 DIR="${0:A:h}"
