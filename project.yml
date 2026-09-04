@@ -11,10 +11,10 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.keegan.flowstate
-        MARKETING_VERSION: "0.1.9"
+        MARKETING_VERSION: "0.2.0"
         GENERATE_INFOPLIST_FILE: true
         # Tells macOS this is a menu-bar accessory (no Dock icon):
         INFOPLIST_KEY_LSUIElement: true
-        # Shown in the one-time "Flowstate wants to control Terminal" Automation prompt:
-        INFOPLIST_KEY_NSAppleEventsUsageDescription: "Flowstate uses Terminal to launch and place the spotify_player music player."
-        ENABLE_APP_SANDBOX: false       # we shell out to spotify_player, aerospace, osascript
+        # Shown in the one-time "Flowstate wants to control Spotify" Automation prompt:
+        INFOPLIST_KEY_NSAppleEventsUsageDescription: "Flowstate controls the Spotify app to play your focus soundtrack."
+        ENABLE_APP_SANDBOX: false       # we shell out to osascript (AppleScript → Spotify)

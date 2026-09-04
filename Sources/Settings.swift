@@ -24,7 +24,7 @@ final class Settings {
     var backToWorkVolume: Double { didSet { d.set(backToWorkVolume, forKey: "backToWorkVolume") } }
     var longBreakVolume: Double  { didSet { d.set(longBreakVolume, forKey: "longBreakVolume") } }
 
-    // MARK: Soundtrack (spotify_player)
+    // MARK: Soundtrack (official Spotify app)
     var playSoundtrack: Bool    { didSet { d.set(playSoundtrack, forKey: "playSoundtrack") } }
     var spotifyVolume: Int      { didSet { d.set(spotifyVolume, forKey: "spotifyVolume") } }
     var alwaysShuffle: Bool     { didSet { d.set(alwaysShuffle, forKey: "alwaysShuffle") } }
@@ -35,7 +35,6 @@ final class Settings {
     var slot2Target: String     { didSet { d.set(slot2Target, forKey: "slot2Target") } }
     var slot3Label: String      { didSet { d.set(slot3Label, forKey: "slot3Label") } }
     var slot3Target: String     { didSet { d.set(slot3Target, forKey: "slot3Target") } }
-    var spotifyWorkspace: Int   { didSet { d.set(spotifyWorkspace, forKey: "spotifyWorkspace") } }
 
     // MARK: Derived
     var slotLabels: [String]  { [slot1Label, slot2Label, slot3Label] }
@@ -70,14 +69,17 @@ final class Settings {
         playSoundtrack    = b("playSoundtrack", true)
         spotifyVolume     = i("spotifyVolume", 35)
         alwaysShuffle     = b("alwaysShuffle", true)
-        activeSlot        = i("activeSlot", 2)                    // 0-based → Liked
+        activeSlot        = i("activeSlot", 0)
+        // Defaults are three of Spotify's own public focus playlists, so a fresh install
+        // plays immediately with zero setup. A slot Target is any Spotify playlist/album/
+        // artist URI or open.spotify.com link. To use your Liked Songs, point a slot at a
+        // *mirror* playlist (scripts/sync_liked_playlist.py, or Cmd-A in Liked Songs → Add
+        // to a new playlist) — the desktop app can't shuffle Liked Songs directly.
         slot1Label        = s("slot1Label", "Lofi")
-        slot1Target       = s("slot1Target", "spotify:playlist:37i9dQZF1DWWQRwui0ExPn")
-        slot2Label        = s("slot2Label", "Discover Weekly")
-        // Discover Weekly is a per-user playlist — this is the owner's; others set their own.
-        slot2Target       = s("slot2Target", "spotify:playlist:37i9dQZEVXcRAcxrqHLe1Q")
-        slot3Label        = s("slot3Label", "Liked")
-        slot3Target       = s("slot3Target", "liked")
-        spotifyWorkspace  = i("spotifyWorkspace", 9)             // 0 = leave in place
+        slot1Target       = s("slot1Target", "spotify:playlist:37i9dQZF1DWWQRwui0ExPn")  // Lofi Beats
+        slot2Label        = s("slot2Label", "Deep Focus")
+        slot2Target       = s("slot2Target", "spotify:playlist:37i9dQZF1DWZeKCadgRdKQ")  // Deep Focus
+        slot3Label        = s("slot3Label", "Piano")
+        slot3Target       = s("slot3Target", "spotify:playlist:37i9dQZF1DX4sWSpwq3LiO")  // Peaceful Piano
     }
 }

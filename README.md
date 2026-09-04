@@ -1,31 +1,32 @@
 # Flowstate (macOS)
 
 A macOS menu-bar Pomodoro timer with the current round visible **in the menu bar itself**
-— e.g. `⌖ ●●○○ 12:34` — plus a `spotify_player`-driven focus soundtrack (Liked-Songs
-shuffle included). A port of the [omarchy-flowstate](https://github.com/keegan-sucks/omarchy-flowstate)
+— e.g. `⌖ ●●○○ 12:34` — plus a focus soundtrack that drives the **official Spotify app**.
+A port of the [omarchy-flowstate](https://github.com/keegan-sucks/omarchy-flowstate)
 Quickshell bar widget down to the essentials that matter on macOS.
 
 ## Features
 
 - **Live in the menu bar:** a monochrome focus glyph, filled/empty round dots, and the
   running clock (`⌖ ●●○○ 12:34` focus, `☾ …` break). Glyphs are configurable.
-- **Clean panel:** round dots, phase, big clock, Start/Pause · Skip · Reset, and three
-  soundtrack slot buttons. Everything else lives in a resizable **Settings** window (⚙).
+- **Clean panel:** round dots, phase, big clock, Start/Pause · Skip · Reset, three
+  soundtrack slot buttons, and a skip-song button. Everything else lives in a
+  resizable **Settings** view (⚙).
 - **No timed long break:** after the last focus block the session ends with an audible cue
   (take your break whenever). Short breaks between blocks are timed.
 - **Phase sounds:** distinct macOS system sounds for *short break*, *back to work*, and
   *long break* — each with its own sound picker + volume slider + preview.
-- **Spotify soundtrack** via `spotify_player` (its own librespot Connect device, so
-  **Liked-Songs shuffle** works — the native Spotify AppleScript can't do that):
-  - **Liked** starts on a random track (`playback start liked --random`).
-  - **Playlists/albums** start on a random track via a muted shuffle-and-skip (contexts
-    always begin at track 1, so we start muted, shuffle, skip a few, then unmute).
-  - Ducks to a configurable focus volume; **pauses during breaks**, resumes on focus;
-    at the end of the cycle it pauses and restores your previous volume (the player is
-    left open, not killed).
-- **Workspace placement:** the player's terminal is moved to an AeroSpace workspace
-  (default 9) by window-id, without stealing focus.
-- **Now-playing notifications:** optional alert each time the song changes.
+- **Spotify soundtrack** through the official Spotify desktop app (via AppleScript — no
+  extra player, no CLI, no login inside Flowstate):
+  - Point each of the three slots at a Spotify **playlist, album, or artist** (its
+    `spotify:…` URI or an `open.spotify.com` link). Switch slots live during focus.
+  - Starts **shuffled** on a varied track (not always track 1), ducks to a configurable
+    focus volume, **pauses during breaks** and resumes on focus, and at the end of the
+    cycle pauses and restores your previous volume.
+  - Rock-solid: it just remote-controls the app you already use, so there's no librespot
+    Connect device to drop and no "no playback found."
+- **Liked Songs** work too — via a mirror playlist (see below), since the desktop app
+  can't shuffle Liked Songs directly.
 
 ## Install
 
@@ -33,28 +34,55 @@ Quickshell bar widget down to the essentials that matter on macOS.
 brew install --cask keegan-sucks/tap/flowstate
 ```
 
-Flowstate is ad-hoc signed, so clear Gatekeeper on first launch (once) — or right-click
-the app and choose Open:
+This also installs the **Spotify** app if you don't have it. Flowstate is ad-hoc signed,
+so clear Gatekeeper on first launch (once) — or right-click the app and choose Open:
 
 ```bash
 xattr -dr com.apple.quarantine "/Applications/Flowstate.app"
 ```
 
-Then authenticate the soundtrack once: `spotify_player authenticate` (needs Spotify
-Premium). Optionally install [AeroSpace](https://github.com/nikitabobko/AeroSpace) for
-workspace placement.
+On first play, macOS shows a one-time **"Flowstate wants to control Spotify"** prompt —
+click OK. Log into Spotify (Premium recommended for gapless, ad-free focus), and you're set.
 
 Update later with `brew update && brew upgrade --cask flowstate` (`brew update` refreshes
 the tap first).
+
+## Liked Songs (optional)
+
+The Spotify app can't shuffle **Liked Songs** on its own, so mirror them into an ordinary
+playlist and point a slot at that. Two ways:
+
+- **By hand (no setup):** in Spotify, open *Liked Songs* → `Cmd-A` to select all →
+  right-click → *Add to playlist* → *New playlist*. Copy that playlist's link into a slot.
+- **Auto-syncing (keeps up as you like/unlike):** run the included script. It reads your
+  saved tracks and mirrors them into a "Liked (Flowstate)" playlist, then prints the URI
+  to paste into a slot:
+
+  ```bash
+  pip3 install spotipy
+  # one-time: create a free app at https://developer.spotify.com/dashboard,
+  # add redirect URI http://127.0.0.1:8888/callback, then:
+  export SPOTIPY_CLIENT_ID='...'; export SPOTIPY_CLIENT_SECRET='...'
+  export SPOTIPY_REDIRECT_URI='http://127.0.0.1:8888/callback'
+  python3 scripts/sync_liked_playlist.py
+  ```
+
+  To keep the mirror fresh automatically, install the **weekly** re-sync LaunchAgent
+  (put your `SPOTIPY_*` vars in `~/.config/flowstate/sync.env` so the unattended run can
+  read them — see `scripts/run_sync.sh`):
+
+  ```bash
+  scripts/install_sync_schedule.sh
+  ```
 
 ## Requirements (to build from source)
 
 - macOS 14+
 - Full **Xcode** (to build the menu-bar GUI app)
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen) — `brew install xcodegen`
-- [spotify_player](https://github.com/aome510/spotify-player) + Spotify **Premium** —
-  `brew install spotify_player`, then `spotify_player authenticate`
-- [AeroSpace](https://github.com/nikitabobko/AeroSpace) — optional, for workspace placement
+- The **Spotify** desktop app (`brew install --cask spotify`)
+- Python 3 + [spotipy](https://github.com/spotipy-dev/spotipy) — only for the optional
+  Liked-Songs mirror script
 
 ## Build & run
 
@@ -72,20 +100,12 @@ open build/Build/Products/Debug/Flowstate.app
 
 Open the ⚙ (or press **E**). Sections: **General** (launch at login) · **Timer**
 (durations, rounds) · **Menu-bar glyphs** · **Sounds** (per cue: choice + volume +
-preview) · **Soundtrack** (play toggle, focus volume, always-shuffle, player workspace,
-three editable slots). A slot **Target** is a Spotify URI/URL (`spotify:playlist:…`,
-album, or artist) or the keyword `liked`. Settings persist across launches.
+preview) · **Soundtrack** (play toggle, focus volume, always-shuffle, three editable
+slots). A slot **Target** is a Spotify playlist/album/artist URI (`spotify:playlist:…`)
+or an `open.spotify.com` link. Settings persist across launches.
 
 With the panel open: **Space** start/pause · **R** reset · **S** skip phase ·
 **N** skip song · **E** edit · **Esc** close edit.
-
-## Notes
-
-- **Only hearing Liked songs?** Turn **off** Spotify → Settings → Playback → *Autoplay* —
-  Liked Songs has no "context," so with Autoplay on, Spotify appends non-liked
-  recommendations once the queued liked tracks run down.
-- The player runs in **Terminal.app**; at cycle end the music is paused and the window is
-  left open (Terminal keeps its window on this setup).
 
 ## Layout
 
@@ -95,7 +115,7 @@ Sources/
   TimerEngine.swift       # the Pomodoro state machine (round tracking lives here)
   Settings.swift          # persisted config (@Observable + UserDefaults)
   Sound.swift             # phase-cue sounds (NSSound)
-  MusicController.swift    # spotify_player CLI + AeroSpace workspace placement
+  MusicController.swift    # drives the Spotify app via AppleScript (osascript)
   Shell.swift             # small Process helper
   LoginItem.swift         # launch-at-login (SMAppService)
   Views/
@@ -103,7 +123,10 @@ Sources/
     PanelView.swift       # the menu-bar panel
     EditView.swift        # the ⚙ edit view
 scripts/
-  release.sh              # cut a release + bump the Homebrew cask
+  release.sh                 # cut a release + bump the Homebrew cask
+  sync_liked_playlist.py     # mirror Liked Songs → a playlist (optional)
+  run_sync.sh                # wrapper the weekly sync LaunchAgent runs
+  install_sync_schedule.sh   # install the weekly Liked-mirror sync
 ```
 
 ## Releasing
@@ -111,5 +134,5 @@ scripts/
 Cut a new version and update the Homebrew cask in one step (uses your `gh` auth):
 
 ```bash
-scripts/release.sh 1.1
+scripts/release.sh 0.2.1
 ```

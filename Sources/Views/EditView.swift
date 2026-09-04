@@ -107,13 +107,12 @@ struct EditView: View {
                    in: 0...100)
 
             Toggle("Always shuffle", isOn: $settings.alwaysShuffle)
-            stepperRow("Player workspace (0 = leave in place)", value: $settings.spotifyWorkspace, range: 0...20, unit: nil)
 
             slotEditor("Slot 1", label: $settings.slot1Label, target: $settings.slot1Target)
             slotEditor("Slot 2", label: $settings.slot2Label, target: $settings.slot2Target)
             slotEditor("Slot 3", label: $settings.slot3Label, target: $settings.slot3Target)
 
-            Text("Target: a Spotify URI/URL (playlist, album, or artist), or “liked” for Liked Songs.")
+            Text("Target: a Spotify playlist, album, or artist — its URI (spotify:playlist:…) or link. For Liked Songs, point a slot at a mirror playlist (see the README).")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .opacity(settings.playSoundtrack ? 1 : 0.5)
@@ -173,7 +172,7 @@ struct EditView: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(title).font(.caption).foregroundStyle(.secondary)
             TextField("Label", text: label).textFieldStyle(.roundedBorder)
-            TextField("liked or spotify:playlist:…", text: target).textFieldStyle(.roundedBorder)
+            TextField("spotify:playlist:… or open.spotify.com/…", text: target).textFieldStyle(.roundedBorder)
         }
     }
 

@@ -1,54 +1,33 @@
 import Foundation
 
-/// Drives spotify_player to play the focus soundtrack (incl. Liked-Songs shuffle).
+/// Drives the official Spotify desktop app (via AppleScript) to play the focus
+/// soundtrack. Each slot is an ordinary Spotify playlist/album/artist URI; Liked
+/// Songs are supported by pointing a slot at a *mirror* playlist (see
+/// `scripts/sync_liked_playlist.py`, or make one by hand in Spotify).
 ///
-/// Lifecycle: session start → launch/connect + start (Liked `--random`, or a context
-/// via muted shuffle-and-skip) + duck volume; focus↔break → pause/resume; end → pause
-/// + restore volume (player left open). New player windows are moved to the configured
-/// AeroSpace workspace.
+/// Lifecycle: session start → launch Spotify (in the background, without stealing
+/// focus) + play the active slot, shuffled, ducked to the focus volume; focus↔break
+/// → pause/resume; end → restore the pre-session volume + pause (the app is left
+/// running). No librespot, no Connect device, so there is nothing to drop and no
+/// "no playback found" — which is why there is no watchdog here.
 ///
-/// Concurrency: public methods are called on the main thread. They snapshot the needed
-/// Settings values there (Settings is @Observable and mutated on the main thread, so it
-/// must NOT be read from the background queue), then dispatch work to a serial queue.
-/// A generation counter lets a pause/stop cancel an in-flight `engage()` promptly, and
-/// every start path leaves the device at the focus volume even when it bails early.
+/// Concurrency: public methods run on the main thread and snapshot the Settings they
+/// need there (@Observable Settings must not be read off-main), then dispatch to a
+/// serial queue. A generation counter lets a pause/stop/switch cancel an in-flight
+/// start promptly, and every start restores an audible volume even if it bails early.
 final class MusicController {
     private let settings: Settings
-    private let sp = "/opt/homebrew/bin/spotify_player"
-    private let aerospace = "/opt/homebrew/bin/aerospace"
-    private let device = "spotify-player"
     private let queue = DispatchQueue(label: "com.keegan.flowstate.music")
 
-    private var savedVolume: Int?            // queue-only
+    private var savedVolume: Int?          // queue-only: Spotify's volume before we ducked
     private let genLock = NSLock()
-    private var generation = 0               // guarded by genLock
-
-    // Playback watchdog
-    private let watchdogQueue = DispatchQueue(label: "com.keegan.flowstate.music.watchdog")
-    private var watchdogTimer: DispatchSourceTimer?   // main-thread only
-    private let wdLock = NSLock()
-    private var _shouldBePlaying = false               // guarded by wdLock
-    private var _lastConfig: Config?                   // guarded by wdLock
-    private var shouldBePlaying: Bool {
-        get { wdLock.lock(); defer { wdLock.unlock() }; return _shouldBePlaying }
-        set { wdLock.lock(); _shouldBePlaying = newValue; wdLock.unlock() }
-    }
-    private var lastConfig: Config? {
-        get { wdLock.lock(); defer { wdLock.unlock() }; return _lastConfig }
-        set { wdLock.lock(); _lastConfig = newValue; wdLock.unlock() }
-    }
-    private var _engaging = false                       // guarded by wdLock
-    private var engaging: Bool {                         // true while an engage() is running
-        get { wdLock.lock(); defer { wdLock.unlock() }; return _engaging }
-        set { wdLock.lock(); _engaging = newValue; wdLock.unlock() }
-    }
+    private var generation = 0             // guarded by genLock
 
     /// Immutable snapshot of the Settings the background work needs.
     private struct Config {
         let alwaysShuffle: Bool
         let volume: Int
-        let workspace: Int
-        let target: String
+        let uri: String?          // resolved spotify: URI for the active slot (nil = nothing to play)
     }
 
     init(settings: Settings) { self.settings = settings }
@@ -58,8 +37,6 @@ final class MusicController {
     func startSoundtrack() {
         guard settings.playSoundtrack else { return }
         let cfg = snapshot(); let gen = bumpGeneration()
-        lastConfig = cfg; shouldBePlaying = true
-        startWatchdog()
         queue.async { [weak self] in self?.engage(cfg, gen) }
     }
 
@@ -67,99 +44,41 @@ final class MusicController {
     func switchSoundtrack() {
         guard settings.playSoundtrack else { return }
         let cfg = snapshot(); let gen = bumpGeneration()
-        lastConfig = cfg; shouldBePlaying = true
         queue.async { [weak self] in self?.engage(cfg, gen) }
     }
 
     func pauseForBreak() {
         guard settings.playSoundtrack else { return }
-        shouldBePlaying = false              // paused on purpose — don't let the watchdog recover
-        _ = bumpGeneration()                 // cancel any in-flight engage()
-        queue.async { [weak self] in guard let self else { return }
-            _ = Shell.run("\(self.sp) playback pause")
-        }
+        _ = bumpGeneration()                 // cancel any in-flight start
+        queue.async { [weak self] in self?.pause() }
     }
 
     func resumeFromBreak() {
         guard settings.playSoundtrack else { return }
-        let cfg = snapshot()
-        let gen = bumpGeneration()
-        lastConfig = cfg; shouldBePlaying = true
+        let cfg = snapshot(); let gen = bumpGeneration()
         queue.async { [weak self] in guard let self else { return }
-            _ = Shell.run("\(self.sp) playback play")
-            Thread.sleep(forTimeInterval: 0.8)
+            guard self.spotifyRunning() else { self.engage(cfg, gen); return }
+            self.osa("play")                                   // resume where the break paused
+            Thread.sleep(forTimeInterval: 0.3)
             if self.isCancelled(gen) { return }
-            // Spotify deactivates the librespot device during a break, so a bare `play`
-            // often has no track to resume — reconnect and restart the soundtrack.
-            if self.playbackTrack() == nil {
-                self.engage(cfg, gen)
-            }
+            if self.playerState() != "playing" { self.engage(cfg, gen) }   // context lost → restart
         }
     }
 
     /// Skip the current soundtrack song (not the Pomodoro phase).
     func nextTrack() {
         guard settings.playSoundtrack else { return }
-        queue.async { [weak self] in guard let self else { return }
-            _ = Shell.run("\(self.sp) playback next")
+        queue.async { [weak self] in guard let self, self.spotifyRunning() else { return }
+            self.osa("next track")
         }
     }
 
-    /// Like (save) the currently playing track.
-    func likeCurrentSong() {
-        queue.async { [weak self] in guard let self else { return }
-            _ = Shell.run("\(self.sp) like")
-        }
-    }
-
-    // MARK: Playback watchdog
-
-    private func startWatchdog() {
-        stopWatchdog()
-        let t = DispatchSource.makeTimerSource(queue: watchdogQueue)
-        t.schedule(deadline: .now() + 15, repeating: 8)   // first check after startup settles
-        t.setEventHandler { [weak self] in self?.watchdogTick() }
-        watchdogTimer = t
-        t.resume()
-    }
-
-    private func stopWatchdog() {
-        watchdogTimer?.cancel()
-        watchdogTimer = nil
-    }
-
-    /// If a focus block should be playing but the librespot device has dropped
-    /// ("no playback found"), silently reconnect and restart the soundtrack.
-    private func watchdogTick() {
-        // Skip while a start is legitimately in progress (engaging) — its own startup can
-        // run 20-30s (cold Terminal launch + device wait) with isPlaying() false.
-        guard shouldBePlaying, !engaging, !isPlaying() else { return }
-        Thread.sleep(forTimeInterval: 0.8)                 // confirm — ignore a transient blip
-        guard shouldBePlaying, !engaging, !isPlaying(), let cfg = lastConfig else { return }
-        // Capture (don't bump) the generation: a later start/switch/pause/stop bumps it and
-        // cancels this recovery, and recover() re-checks shouldBePlaying before touching audio.
-        let gen = currentGeneration()
-        queue.async { [weak self] in self?.recover(cfg, gen) }
-    }
-
-    private func recover(_ cfg: Config, _ gen: Int) {
-        guard shouldBePlaying, !isCancelled(gen) else { return }   // superseded by stop/break/switch
-        _ = Shell.run("\(sp) playback play")               // gentle resume first
-        Thread.sleep(forTimeInterval: 0.8)
-        guard shouldBePlaying, !isCancelled(gen) else { return }
-        if playbackTrack() == nil {                        // device really gone → full restart
-            engage(cfg, gen)
-        }
-    }
-
-    /// End of cycle / reset — pause + restore the pre-session volume; leave the player open.
+    /// End of cycle / reset — restore the pre-session volume + pause; leave Spotify open.
     func stopSoundtrack() {
-        shouldBePlaying = false
-        stopWatchdog()
-        _ = bumpGeneration()                 // cancel any in-flight engage()
-        queue.async { [weak self] in guard let self else { return }
-            if let v = self.savedVolume { _ = Shell.run("\(self.sp) playback volume \(v)") }
-            _ = Shell.run("\(self.sp) playback pause")
+        _ = bumpGeneration()
+        queue.async { [weak self] in guard let self, self.spotifyRunning() else { return }
+            if let v = self.savedVolume { self.setVolume(v) }
+            self.osa("pause")
             self.savedVolume = nil
         }
     }
@@ -169,8 +88,7 @@ final class MusicController {
     private func snapshot() -> Config {
         Config(alwaysShuffle: settings.alwaysShuffle,
                volume: settings.spotifyVolume,
-               workspace: settings.spotifyWorkspace,
-               target: settings.activeSlotTarget)
+               uri: trackURI(from: settings.activeSlotTarget))
     }
     private func bumpGeneration() -> Int {
         genLock.lock(); generation += 1; let g = generation; genLock.unlock(); return g
@@ -178,244 +96,121 @@ final class MusicController {
     private func isCancelled(_ g: Int) -> Bool {
         genLock.lock(); let c = generation != g; genLock.unlock(); return c
     }
-    private func currentGeneration() -> Int {
-        genLock.lock(); defer { genLock.unlock() }; return generation
-    }
 
     // MARK: Sequence (serial queue)
 
     private func engage(_ cfg: Config, _ gen: Int) {
-        engaging = true                                  // watchdog must not fight a live start
-        defer { engaging = false }
-        guard ensurePlayer(workspace: cfg.workspace, gen) else { return }
-        _ = Shell.run("\(sp) connect --name \(device)")
-        Thread.sleep(forTimeInterval: 0.6)   // let the device activate before playback commands
-        if savedVolume == nil { savedVolume = currentVolume() ?? 100 }
+        guard let uri = cfg.uri else { return }           // nothing playable (blank, or "liked")
+        guard ensureRunning(gen) else { return }
+        if savedVolume == nil { savedVolume = currentVolume() }
         if isCancelled(gen) { return }
-
-        if isLiked(cfg.target) {
-            startLiked(cfg, gen)
-        } else if let ctx = parseContext(cfg.target) {
-            startContext(ctx, cfg, gen)
-        }
-        if !isCancelled(gen) { ensureRepeatContext() }   // repeat the whole playlist / liked
+        play(uri: uri, cfg, gen)
     }
 
-    /// Liked Songs: `--random` starts on a random track directly. Volume is ducked
-    /// before playback so an early cancel never leaves it un-ducked.
-    private func startLiked(_ cfg: Config, _ gen: Int) {
-        _ = Shell.run("\(sp) playback volume \(cfg.volume)")
-        _ = Shell.run("\(sp) playback start liked --random")
-        Thread.sleep(forTimeInterval: 1.0)
+    /// Start `uri` shuffled and ducked. Muted during setup so the first (track-1)
+    /// moment and the shuffle-skips are silent; the volume is always restored on exit
+    /// (defer), so an early cancel never strands Spotify at volume 0.
+    private func play(uri: String, _ cfg: Config, _ gen: Int) {
+        var restored = false
+        func unmute() { if !restored { setVolume(cfg.volume); restored = true } }
+        defer { unmute() }
+
+        setVolume(0)
         if isCancelled(gen) { return }
-        // Verify it took: Liked playback has no context, so a lingering context.uri means
-        // the previous playlist is still playing (device wasn't ready) — retry once.
-        if contextURI() != nil {
-            _ = Shell.run("\(sp) playback start liked --random")
-            Thread.sleep(forTimeInterval: 1.0)
-        }
-        if !isPlaying() { _ = Shell.run("\(sp) playback play") }
-        if cfg.alwaysShuffle { ensureShuffleOn() }
-    }
-
-    /// Contexts always begin at track 1 and have no `--random`. When shuffling, start
-    /// MUTED, enable shuffle, skip a few tracks to a random position, then unmute — a
-    /// varied first track with no audible blips. Commands are paced ~0.7s apart
-    /// (spotify_player drops them if fired faster). The final unmute always runs, so a
-    /// mid-sequence cancel never strands the device at volume 0.
-    private func startContext(_ ctx: (type: String, id: String), _ cfg: Config, _ gen: Int) {
-        guard cfg.alwaysShuffle else {
-            _ = Shell.run("\(sp) playback volume \(cfg.volume)")   // duck before playing
-            startContextVerified(ctx)
-            if !isPlaying() { _ = Shell.run("\(sp) playback play") }
-            return
-        }
-        _ = Shell.run("\(sp) playback volume 0")
-        Thread.sleep(forTimeInterval: 0.4)
-        startContextVerified(ctx)
-        ensureShuffleOn()
-        Thread.sleep(forTimeInterval: 0.6)
-        for _ in 0..<Int.random(in: 2...5) {
-            if isCancelled(gen) { break }
-            _ = Shell.run("\(sp) playback next")
-            Thread.sleep(forTimeInterval: 0.7)
-        }
-        if !isPlaying() { _ = Shell.run("\(sp) playback play") }
-        _ = Shell.run("\(sp) playback volume \(cfg.volume)")   // always unmute
-    }
-
-    /// Start a context, verifying it took — retry once if the previous context lingers.
-    private func startContextVerified(_ ctx: (type: String, id: String)) {
-        _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
-        Thread.sleep(forTimeInterval: 1.0)
-        if !(contextURI()?.contains(ctx.id) ?? false) {
-            _ = Shell.run("\(sp) playback start context --id \(ctx.id) \(ctx.type)")
-            Thread.sleep(forTimeInterval: 1.0)
-        }
-    }
-
-    private func ensureShuffleOn() {
-        // Read-toggle-verify (a single toggle right after a context change often no-ops).
-        for _ in 0..<3 {
-            if shuffleState() == true { return }
-            _ = Shell.run("\(sp) playback shuffle")
+        osa("play track \"\(uri)\"")                       // starts the context at track 1
+        Thread.sleep(forTimeInterval: 0.35)
+        if playerState() == "stopped" {                    // app still warming up → retry once
+            osa("play track \"\(uri)\"")
             Thread.sleep(forTimeInterval: 0.5)
         }
-    }
+        if isCancelled(gen) { return }
 
-    /// Ensure repeat is "context" (repeat the whole playlist / liked collection).
-    /// Starting playback (liked/context) reliably resets repeat to "off", and the
-    /// repeat_state read lags too much to trust right after a start — so just cycle
-    /// off → track → context (2 steps) blindly. A single settled verify then fixes a
-    /// rare dropped cycle; a stale "off" read is ignored to avoid overshooting.
-    private func ensureRepeatContext() {
-        _ = Shell.run("\(sp) playback repeat")           // off → track
-        Thread.sleep(forTimeInterval: 0.7)
-        _ = Shell.run("\(sp) playback repeat")           // track → context
-        Thread.sleep(forTimeInterval: 1.2)               // settle for an accurate read
-        if repeatState() == "track" {                    // a cycle was dropped
-            _ = Shell.run("\(sp) playback repeat")
-        }
-    }
-
-    // MARK: Launch + AeroSpace placement
-
-    /// Ensure the spotify_player Connect device is available. Reuse a running instance,
-    /// otherwise launch its terminal — retrying once if the process never comes up
-    /// (Terminal's first cold-start `do script`, or the one-time "control Terminal"
-    /// Automation prompt, can make the first attempt a no-op that opens an empty window).
-    private func ensurePlayer(workspace: Int, _ gen: Int) -> Bool {
-        for _ in 1...2 {
-            if isCancelled(gen) { return false }
-            // Reuse a running instance — including one from a slow prior launch — so the
-            // retry never spawns a duplicate.
-            if spotifyRunning() { return waitForDevice(gen, ticks: 60) }
-            let before = terminalWindowIDs()
-            launchPlayerTerminal()
-            for _ in 0..<16 {                          // ~5s for the process to appear
-                if isCancelled(gen) { return false }
-                if spotifyRunning() { break }
-                Thread.sleep(forTimeInterval: 0.3)
+        if cfg.alwaysShuffle {
+            osa("set shuffling to true")                   // context is live now → shuffle sticks
+            Thread.sleep(forTimeInterval: 0.2)
+            for _ in 0..<Int.random(in: 1...4) {           // jump to a varied track in shuffle order
+                if isCancelled(gen) { return }
+                osa("next track")
+                Thread.sleep(forTimeInterval: 0.15)
             }
+        }
+        osa("set repeating to true")                       // loop so a focus block never falls silent
+        if playerState() != "playing" { osa("play") }
+        unmute()                                            // to focus volume (defer is the backstop)
+    }
+
+    private func pause() { if spotifyRunning() { osa("pause") } }
+
+    // MARK: Launch
+
+    /// Ensure Spotify is running (launched in the background, without stealing focus)
+    /// and scriptable. Reuses a running instance.
+    private func ensureRunning(_ gen: Int) -> Bool {
+        if spotifyRunning() { return true }
+        _ = Shell.run("/usr/bin/open -gj -a Spotify")      // -g: don't foreground, -j: launch hidden
+        for _ in 0..<40 {                                  // up to ~10s to come up
+            if isCancelled(gen) { return false }
+            Thread.sleep(forTimeInterval: 0.25)
             if spotifyRunning() {
-                placeNewPlayerWindow(notIn: before, workspace: workspace, gen)
-                return waitForDevice(gen, ticks: 40)
+                Thread.sleep(forTimeInterval: 0.3)         // brief settle until scriptable
+                return true
             }
-            // No process → the launch no-op'd; loop retries (re-checks spotifyRunning first).
         }
-        return false
+        return spotifyRunning()
     }
 
+    // MARK: AppleScript bridge
+
+    /// Run one AppleScript statement against Spotify; returns trimmed stdout.
+    /// Sending a command auto-launches Spotify if needed (callers ensure it first).
+    @discardableResult
+    private func osa(_ stmt: String) -> String {
+        Shell.run("/usr/bin/osascript -e 'tell application \"Spotify\" to \(stmt)'")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// True if Spotify is running — this query does NOT launch it.
     private func spotifyRunning() -> Bool {
-        !Shell.run("/usr/bin/pgrep -x spotify_player")
-            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        Shell.run("/usr/bin/osascript -e 'application \"Spotify\" is running'")
+            .trimmingCharacters(in: .whitespacesAndNewlines) == "true"
     }
 
-    /// Open spotify_player in Terminal, matching how the user launches it by hand:
-    /// on a cold start reuse Terminal's own startup window (so there's no extra empty
-    /// window), and force the window to the user's startup profile (their theme).
-    private func launchPlayerTerminal() {
-        _ = Shell.run(#"osascript -e 'set wasRunning to (application "Terminal" is running)' -e 'tell application "Terminal"' -e 'if wasRunning then' -e 'do script "exec /opt/homebrew/bin/spotify_player"' -e 'else' -e 'do script "exec /opt/homebrew/bin/spotify_player" in window 1' -e 'end if' -e 'delay 0.2' -e 'set current settings of front window to startup settings' -e 'end tell'"#)
-    }
+    private func playerState() -> String { osa("player state") }          // playing / paused / stopped
+    private func currentVolume() -> Int? { Int(osa("sound volume")) }
+    private func setVolume(_ v: Int) { osa("set sound volume to \(max(0, min(100, v)))") }
 
-    /// Move the newly-opened player Terminal window to the workspace (by window-id,
-    /// which doesn't steal focus). Picks the new window whose title mentions
-    /// spotify_player so an unrelated Terminal opened mid-launch is never yanked.
-    private func placeNewPlayerWindow(notIn before: Set<String>, workspace: Int, _ gen: Int) {
-        guard workspace > 0 else { return }            // 0 = leave the window in place
-        for _ in 0..<20 {
-            if isCancelled(gen) { return }
-            let fresh = terminalWindows().filter { !before.contains($0.id) }
-            let match = fresh.first { $0.title.contains("spotify_player") }
-            // Unambiguous fallback: exactly one new window (title not yet resolved).
-            if let id = match?.id ?? (fresh.count == 1 ? fresh.first?.id : nil) {
-                _ = Shell.run("\(aerospace) move-node-to-workspace --window-id \(id) -- \(workspace)")
-                // A window moved to a non-focused workspace floats, and stays settling for
-                // several seconds — a `layout tiling` that runs too early just no-ops. Retry
-                // in the BACKGROUND (so the music start isn't blocked) until it sticks; once
-                // tiled it stays, and repeat `layout tiling` calls are idempotent no-ops.
-                let aero = aerospace
-                DispatchQueue.global(qos: .utility).async {
-                    for _ in 0..<16 {
-                        _ = Shell.run("\(aero) layout --window-id \(id) tiling")
-                        Thread.sleep(forTimeInterval: 0.6)
-                    }
-                }
-                return
-            }
-            Thread.sleep(forTimeInterval: 0.3)
-        }
-    }
+    // MARK: Target parsing → a playable spotify: URI
 
-    /// (window-id, title) of every Terminal window (across monitors).
-    private func terminalWindows() -> [(id: String, title: String)] {
-        let out = Shell.run("\(aerospace) list-windows --monitor all --app-bundle-id com.apple.Terminal --format '%{window-id}|%{window-title}'")
-        return out.split(whereSeparator: \.isNewline).compactMap { line in
-            let parts = line.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
-            guard parts.count == 2 else { return nil }
-            let id = parts[0].trimmingCharacters(in: .whitespaces)
-            return id.isEmpty ? nil : (id, parts[1])
-        }
-    }
-
-    /// AeroSpace window-ids of every Terminal window (across monitors).
-    private func terminalWindowIDs() -> Set<String> {
-        Set(terminalWindows().map { $0.id })
-    }
-
-    private func waitForDevice(_ gen: Int, ticks: Int) -> Bool {
-        for _ in 0..<ticks {
-            if isCancelled(gen) { return false }
-            if Shell.run("\(sp) get key devices").contains("\"name\":\"\(device)\"") { return true }
-            Thread.sleep(forTimeInterval: 0.5)
-        }
-        return false
-    }
-
-    // MARK: JSON reads (parsed in Swift — no jq dependency)
-
-    private func playbackJSON() -> [String: Any]? {
-        let out = Shell.run("\(sp) get key playback")
-        guard let data = out.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        return obj
-    }
-    private func isPlaying() -> Bool { playbackJSON()?["is_playing"] as? Bool ?? false }
-    private func shuffleState() -> Bool? { playbackJSON()?["shuffle_state"] as? Bool }
-    private func repeatState() -> String? { playbackJSON()?["repeat_state"] as? String }
-    private func contextURI() -> String? { (playbackJSON()?["context"] as? [String: Any])?["uri"] as? String }
-    private func playbackTrack() -> String? {
-        (playbackJSON()?["item"] as? [String: Any])?["name"] as? String
-    }
-    private func currentVolume() -> Int? {
-        (playbackJSON()?["device"] as? [String: Any])?["volume_percent"] as? Int
-    }
-
-    // MARK: Target parsing (spotify:TYPE:ID | open.spotify.com/…/TYPE/ID | liked | bare id)
-
-    private func isLiked(_ s: String) -> Bool {
-        let l = s.lowercased()
-        return l == "liked" || l == "likes" || l.contains(":collection")
-    }
-
-    private func parseContext(_ raw: String) -> (type: String, id: String)? {
+    /// Resolve a slot target to a `spotify:…` URI that `play track` accepts, or nil.
+    /// Accepts `spotify:playlist:…`, an open.spotify.com URL, or a bare playlist id.
+    /// "liked" has no native equivalent — point the slot at a mirror playlist instead.
+    /// The result is restricted to Spotify-URI characters so a pasted target can't
+    /// break out of the AppleScript/shell quoting.
+    private func trackURI(from raw: String) -> String? {
         let r = raw.trimmingCharacters(in: .whitespaces)
         guard !r.isEmpty else { return nil }
-        let kinds = ["playlist", "album", "artist"]
+        let lower = r.lowercased()
+        if lower == "liked" || lower == "likes" || lower.contains(":collection") { return nil }
+
+        var uri: String?
         if r.hasPrefix("spotify:") {
-            let parts = r.split(separator: ":").map(String.init)
-            if parts.count >= 3, kinds.contains(parts[1]) { return (parts[1], parts[2]) }
-            return nil   // spotify: URI of an unsupported type (track/episode/…) — reject
-        }
-        if r.contains("open.spotify.com") {
+            uri = r
+        } else if r.contains("open.spotify.com") {
+            let kinds = ["playlist", "album", "artist", "track"]
             let comps = r.components(separatedBy: "/")
             if let idx = comps.firstIndex(where: { kinds.contains($0) }), idx + 1 < comps.count {
                 var id = comps[idx + 1]
                 if let q = id.firstIndex(of: "?") { id = String(id[..<q]) }
-                return (comps[idx], id)
+                uri = "spotify:\(comps[idx]):\(id)"
             }
-            return nil   // spotify URL of an unsupported type — reject
+        } else {
+            uri = "spotify:playlist:\(r)"                  // bare id → assume a playlist
         }
-        return ("playlist", r)   // bare id → assume a playlist
+
+        // Real Spotify URIs are only letters, digits, colons (and -._ in some user URIs).
+        guard let u = uri,
+              u.allSatisfy({ $0.isLetter || $0.isNumber || ":-._".contains($0) })
+        else { return nil }
+        return u
     }
 }

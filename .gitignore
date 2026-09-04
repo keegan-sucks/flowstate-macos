@@ -9,3 +9,7 @@ build/
 
 # macOS
 .DS_Store
+
+# Spotify OAuth token cache from scripts/sync_liked_playlist.py (contains tokens)
+.cache-flowstate-liked-sync
+.cache-*
