@@ -1,23 +1,21 @@
 #!/bin/zsh
-# Wrapper the weekly LaunchAgent runs (see install_sync_schedule.sh). It loads your
-# Spotify API credentials, then runs the Liked-Songs mirror sync.
+# Wrapper the weekly LaunchAgent runs. install_sync_schedule.sh copies this (and
+# sync_liked_playlist.py + the token cache) into ~/.config/flowstate and points the
+# agent there — deliberately OUT of ~/Documents / ~/Desktop / ~/Downloads, which
+# macOS privacy (TCC) blocks background LaunchAgents from reading.
 #
-# Credentials, in priority order:
-#   1. ~/.config/flowstate/sync.env   ← recommended for scheduled runs (KEY=VALUE per line):
-#          SPOTIPY_CLIENT_ID=...
-#          SPOTIPY_CLIENT_SECRET=...
-#          SPOTIPY_REDIRECT_URI=http://127.0.0.1:8888/callback
-#   2. otherwise it best-effort sources ~/.zshrc (where you may have exported them).
-# Override the env-file path with FLOWSTATE_ENV.
+# Credentials: loaded from sync.env next to this script (or ~/.config/flowstate/
+# sync.env, or $FLOWSTATE_ENV). See sync.env.example. It runs from its own dir so the
+# OAuth token cache (.cache-flowstate-liked-sync) is found and reused.
 set -e
 
-ENV_FILE="${FLOWSTATE_ENV:-$HOME/.config/flowstate/sync.env}"
-if [[ -f "$ENV_FILE" ]]; then
-    set -a; source "$ENV_FILE"; set +a
-elif [[ -f "$HOME/.zshrc" ]]; then
-    source "$HOME/.zshrc" 2>/dev/null || true
-fi
+DIR="${0:A:h}"
+for f in "$FLOWSTATE_ENV" "$DIR/sync.env" "$HOME/.config/flowstate/sync.env"; do
+    if [[ -n "$f" && -f "$f" ]]; then
+        set -a; source "$f"; set +a
+        break
+    fi
+done
 
-# Run from the repo root so the OAuth token cache (.cache-flowstate-liked-sync) is reused.
-cd "${0:A:h}/.."
-exec /usr/bin/python3 scripts/sync_liked_playlist.py "$@"
+cd "$DIR"
+exec /usr/bin/python3 "$DIR/sync_liked_playlist.py" "$@"

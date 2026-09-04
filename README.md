@@ -69,11 +69,15 @@ playlist and point a slot at that. Two ways:
 
   To keep the mirror fresh automatically, install the **weekly** re-sync LaunchAgent
   (put your `SPOTIPY_*` vars in `~/.config/flowstate/sync.env` so the unattended run can
-  read them — see `scripts/run_sync.sh`):
+  read them — see `scripts/sync.env.example`):
 
   ```bash
   scripts/install_sync_schedule.sh
   ```
+
+  It copies the sync into `~/.config/flowstate` and schedules it for Sundays at 04:00.
+  (The runtime lives there, not in the repo, because macOS privacy blocks background
+  LaunchAgents from reading `~/Documents`, `~/Desktop`, and `~/Downloads`.)
 
 ## Requirements (to build from source)
 
