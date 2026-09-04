@@ -10,7 +10,7 @@ playlist's contents, so it stays a faithful mirror).
 Prints the playlist URI at the end — paste that into a Flowstate slot.
 
 Auth: Spotify's PKCE flow — you need a **client_id** but **no client secret**
-(a client_id is public and safe). The token is cached next to this script.
+(a client_id is public and safe). The token is cached in ~/.config/flowstate.
 
 ────────────────────────────────────────────────────────────────────────────
 ONE-TIME SETUP (≈2 min)  —  or just run  scripts/setup_liked.sh  which does this
@@ -31,8 +31,8 @@ ONE-TIME SETUP (≈2 min)  —  or just run  scripts/setup_liked.sh  which does 
 
 4. Run it:
      python3 scripts/sync_liked_playlist.py
-   The first run opens your browser once to authorize; the token is cached to
-   .cache-flowstate-liked-sync beside this script, so later runs are silent.
+   The first run opens your browser once to authorize; the token is cached in
+   ~/.config/flowstate, so later runs are silent.
 """
 
 import os
@@ -51,9 +51,12 @@ PLAYLIST_DESC = "Auto-synced mirror of Liked Songs (managed by Flowstate)."
 # Scopes: read the library, read+write private playlists.
 SCOPE = "user-library-read playlist-read-private playlist-modify-private playlist-modify-public"
 
-# Cache the OAuth token beside this script, so it's found regardless of cwd
-# (matters for the scheduled run, which lives in ~/.config/flowstate).
-CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache-flowstate-liked-sync")
+# Cache the OAuth token in ~/.config/flowstate — a fixed, cwd-independent home that
+# the scheduled run shares, and (crucially) never the repo or the app bundle, so a
+# token can't be committed or shipped with the .app.
+_CONFIG_DIR = os.path.expanduser("~/.config/flowstate")
+os.makedirs(_CONFIG_DIR, exist_ok=True)
+CACHE = os.path.join(_CONFIG_DIR, ".cache-flowstate-liked-sync")
 
 DEFAULT_REDIRECT = "http://127.0.0.1:8888/callback"
 

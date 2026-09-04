@@ -112,7 +112,21 @@ struct EditView: View {
             slotEditor("Slot 2", label: $settings.slot2Label, target: $settings.slot2Target)
             slotEditor("Slot 3", label: $settings.slot3Label, target: $settings.slot3Target)
 
-            Text("Target: a Spotify playlist, album, or artist — its URI (spotify:playlist:…) or link. For Liked Songs, point a slot at a mirror playlist (see the README).")
+            Text("Target: a Spotify playlist, album, or artist — its URI (spotify:playlist:…) or link.")
+                .font(.caption2).foregroundStyle(.secondary)
+
+            Divider().padding(.vertical, 2)
+
+            HStack {
+                Button {
+                    LikedSetup.launch()
+                } label: {
+                    Label("Set up Liked Songs…", systemImage: "heart.text.square")
+                }
+                .controlSize(.small)
+                Spacer()
+            }
+            Text("Optional. The Spotify app can't shuffle Liked Songs directly, so this mirrors them into a playlist and keeps it fresh. Opens a short guided setup in Terminal.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .opacity(settings.playSoundtrack ? 1 : 0.5)

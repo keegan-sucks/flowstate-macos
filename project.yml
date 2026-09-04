@@ -7,7 +7,11 @@ targets:
   Flowstate:
     type: application
     platform: macOS
-    sources: [Sources]
+    sources:
+      - path: Sources
+      - path: scripts            # bundled into Contents/Resources/scripts (in-app Liked setup)
+        type: folder
+        buildPhase: resources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.keegan.flowstate

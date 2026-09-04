@@ -25,7 +25,7 @@ Prefer no developer account? Skip this and make a mirror by hand any time:
 "
 
 printf "Set up Liked-Songs auto-sync now? [y/N] "
-read -r ans
+read -r ans || ans=""
 if [[ "$ans" != [yY]* ]]; then
     print -r -- "Skipped. Re-run  scripts/setup_liked.sh  whenever you like."
     exit 0
@@ -48,7 +48,7 @@ print -r -- "
 "
 open "https://developer.spotify.com/dashboard" 2>/dev/null || true
 printf "Paste your Client ID: "
-read -r CID
+read -r CID || CID=""
 [[ -n "$CID" ]] || { print -r -- "No Client ID — aborting."; exit 1; }
 
 mkdir -p "$ENV_DIR"

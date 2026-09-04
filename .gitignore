@@ -13,3 +13,7 @@ build/
 # Spotify OAuth token cache from scripts/sync_liked_playlist.py (contains tokens)
 .cache-flowstate-liked-sync
 .cache-*
+
+# Python bytecode
+__pycache__/
+*.pyc
