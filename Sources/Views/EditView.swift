@@ -117,16 +117,20 @@ struct EditView: View {
 
             Divider().padding(.vertical, 2)
 
+            Text("Liked Songs").font(.caption.weight(.semibold))
+            Text("Spotify can't shuffle Liked Songs directly, so point a slot at a mirror playlist. Easiest, no setup: in Spotify open Liked Songs → ⌘A → right-click → Add to playlist → New playlist, then paste that playlist's link into a slot above.")
+                .font(.caption2).foregroundStyle(.secondary)
+
             HStack {
                 Button {
                     LikedSetup.launch()
                 } label: {
-                    Label("Set up Liked Songs…", systemImage: "heart.text.square")
+                    Label("Auto-refresh Liked Songs…", systemImage: "arrow.triangle.2.circlepath")
                 }
                 .controlSize(.small)
                 Spacer()
             }
-            Text("Optional. The Spotify app can't shuffle Liked Songs directly, so this mirrors them into a playlist and keeps it fresh. Opens a short guided setup in Terminal.")
+            Text("Optional — keeps the mirror in sync automatically. Needs your own free Spotify app (just a Client ID — no password, no secret). Opens a guided setup in Terminal.")
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .opacity(settings.playSoundtrack ? 1 : 0.5)

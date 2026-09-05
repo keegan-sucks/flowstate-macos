@@ -11,20 +11,22 @@ ENV_DIR="$HOME/.config/flowstate"
 ENV_FILE="$ENV_DIR/sync.env"
 
 print -r -- "
-Flowstate — Liked Songs auto-sync (optional)
-────────────────────────────────────────────
-Flowstate already plays any Spotify playlist with zero setup. This step mirrors your
-Liked Songs into a playlist it can shuffle, and refreshes it weekly.
+Flowstate — Liked Songs
+───────────────────────
+Spotify can't shuffle Liked Songs directly, so you point a slot at a mirror playlist.
 
-It needs a free Spotify \"developer app\" — just a Client ID, NO secret. (Spotify no
-longer lets one shared app serve many users, so each person makes their own; it's ~2 min.)
+★ EASIEST — no account setup, ~30 seconds (recommended):
+    In Spotify: open Liked Songs → Cmd-A → right-click → Add to playlist →
+    New playlist, then paste that playlist's link into a Flowstate slot
+    (Settings ⚙ → Soundtrack). Done — you can stop here.
 
-Prefer no developer account? Skip this and make a mirror by hand any time:
-  Spotify → Liked Songs → Cmd-A → right-click → Add to playlist → New playlist,
-  then paste that playlist's link into a Flowstate slot (Settings ⚙ → Soundtrack).
+This tool is the OPTIONAL alternative: it builds that mirror for you and keeps it in
+sync automatically every week. The trade-off is it needs your own free Spotify app —
+just a Client ID (no password, no secret), ~2 min — because Spotify no longer lets one
+shared app serve everyone.
 "
 
-printf "Set up Liked-Songs auto-sync now? [y/N] "
+printf "Set up the optional weekly auto-refresh now? [y/N] "
 read -r ans || ans=""
 if [[ "$ans" != [yY]* ]]; then
     print -r -- "Skipped. Re-run  scripts/setup_liked.sh  whenever you like."
